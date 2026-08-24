@@ -1,8 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
-import BackgroundMusic from './components/BackgroundMusic';
-
+import { MusicProvider } from './context/MusicContext';
 import HomePage from './pages/HomePage';
 import RiwayatPage from './pages/RiwayatPage';
 import NotifikasiPage from './pages/NotifikasiPage';
@@ -13,34 +12,16 @@ import StrukPage from './pages/StrukPage';
 
 export default function App() {
   return (
-    <>
-      {/* Background Music */}
-      <BackgroundMusic />
-
+    // MusicProvider owns the <audio> element so playback survives route changes.
+    <MusicProvider>
       <Routes>
         <Route element={<Layout />}>
           {/* Public pages */}
           <Route index element={<HomePage />} />
-
-          <Route
-            path="riwayat"
-            element={<RiwayatPage />}
-          />
-
-          <Route
-            path="notifikasi"
-            element={<NotifikasiPage />}
-          />
-
-          <Route
-            path="hubungi"
-            element={<HubungiPage />}
-          />
-
-          <Route
-            path="struk"
-            element={<StrukPage />}
-          />
+          <Route path="riwayat" element={<RiwayatPage />} />
+          <Route path="notifikasi" element={<NotifikasiPage />} />
+          <Route path="hubungi" element={<HubungiPage />} />
+          <Route path="struk" element={<StrukPage />} />
 
           {/* Auth-protected pages */}
           <Route
@@ -51,7 +32,6 @@ export default function App() {
               </ProtectedRoute>
             }
           />
-
           <Route
             path="payment"
             element={
@@ -62,12 +42,9 @@ export default function App() {
           />
 
           {/* Fallback */}
-          <Route
-            path="*"
-            element={<Navigate to="/" replace />}
-          />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
-    </>
+    </MusicProvider>
   );
 }
