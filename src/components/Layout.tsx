@@ -4,7 +4,6 @@ import Header from './Header';
 import SideMenu from './SideMenu';
 import BottomNavbar from './BottomNavbar';
 import PushBanner from './PushBanner';
-import BackgroundMusic from './BackgroundMusic';
 
 export default function Layout() {
   const [menuOpen, setMenuOpen] = useState(false);
