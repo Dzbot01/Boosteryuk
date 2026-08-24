@@ -1,27 +1,41 @@
 import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Settings, HelpCircle } from 'lucide-react';
+import { Settings, HelpCircle, Music, Pause } from 'lucide-react';
 import FAQModal from './FAQModal';
 import SettingsModal from './SettingsModal';
 import { useAuth } from '../context/AuthContext';
+import { useMusic } from '../context/MusicContext';
 
 export default function BottomNavbar() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const { pathname } = useLocation();
+  const { playing, toggle, showTooltip } = useMusic();
   const [showFAQ, setShowFAQ] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const profileActive = pathname === '/profil';
 
   const items = [
-    { key: 'settings', icon: Settings, label: 'Pengaturan', open: () => setShowSettings(true), on: showSettings },
-    { key: 'faq', icon: HelpCircle, label: 'FAQ', open: () => setShowFAQ(true), on: showFAQ },
+    {
+      key: 'settings',
+      icon: Settings,
+      label: 'Pengaturan',
+      open: () => setShowSettings(true),
+      on: showSettings,
+    },
+    {
+      key: 'faq',
+      icon: HelpCircle,
+      label: 'FAQ',
+      open: () => setShowFAQ(true),
+      on: showFAQ,
+    },
   ];
 
   return (
     <>
       <div className="fixed bottom-5 left-1/2 z-30 -translate-x-1/2">
-        <div className="flex items-center gap-1 rounded-full border border-slate-200 bg-white/95 p-1.5 shadow-[0_12px_30px_-8px_rgba(15,23,42,0.28)] backdrop-blur-xl dark:border-slate-700/60 dark:bg-slate-800/95 dark:shadow-black/40">
+        <div className="relative flex items-center gap-1 rounded-full border border-slate-200 bg-white/95 p-1.5 shadow-[0_12px_30px_-8px_rgba(15,23,42,0.28)] backdrop-blur-xl dark:border-slate-700/60 dark:bg-slate-800/95 dark:shadow-black/40">
           {items.map(({ key, icon: Icon, label, open, on }) => (
             <button
               key={key}
@@ -43,7 +57,51 @@ export default function BottomNavbar() {
             </button>
           ))}
 
-          {/* Profile — visible after login */}
+          {/* ---------- Music toggle ---------- */}
+          <div className="relative">
+            {/* onboarding tooltip */}
+            {showTooltip && (
+              <div className="absolute bottom-full left-1/2 z-10 mb-3 w-max max-w-[220px] -translate-x-1/2 animate-fade-in rounded-xl bg-slate-900 px-3.5 py-2.5 text-center shadow-xl dark:bg-slate-100">
+                <p className="text-[11.5px] font-bold leading-snug text-white dark:text-slate-900">
+                  Putar musik biar makin santai 🎵
+                </p>
+                <span className="absolute -bottom-1 left-1/2 h-2.5 w-2.5 -translate-x-1/2 rotate-45 bg-slate-900 dark:bg-slate-100" />
+              </div>
+            )}
+
+            <button
+              onClick={toggle}
+              aria-label={playing ? 'Hentikan musik' : 'Putar musik'}
+              aria-pressed={playing}
+              title={playing ? 'Hentikan musik' : 'Putar musik'}
+              className={`group relative flex h-10 w-10 items-center justify-center rounded-full transition-all duration-250 active:scale-90 ${
+                playing
+                  ? 'bg-cyan-600 text-white shadow-md shadow-cyan-600/30'
+                  : 'text-slate-500 hover:bg-slate-100 hover:text-cyan-700 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-cyan-400'
+              }`}
+            >
+              {playing ? (
+                <Pause className="h-[18px] w-[18px] fill-current" strokeWidth={2} />
+              ) : (
+                <Music className="h-[18px] w-[18px] transition-transform duration-300 group-hover:scale-110" strokeWidth={2} />
+              )}
+
+              {/* pulsing ring while playing */}
+              {playing && (
+                <span className="pointer-events-none absolute inset-0 rounded-full text-cyan-400 pulse-ring" />
+              )}
+
+              {/* attention dot before the first interaction */}
+              {showTooltip && !playing && (
+                <span className="absolute -right-0.5 -top-0.5 flex h-2.5 w-2.5">
+                  <span className="absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75 pulse-ring text-cyan-400" />
+                  <span className="relative h-2.5 w-2.5 rounded-full border-2 border-white bg-cyan-500 dark:border-slate-800" />
+                </span>
+              )}
+            </button>
+          </div>
+
+          {/* ---------- Profile — visible after login ---------- */}
           {user && (
             <>
               <span className="mx-0.5 h-7 w-px bg-slate-200 dark:bg-slate-700" />
