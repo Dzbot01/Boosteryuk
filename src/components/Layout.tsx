@@ -23,8 +23,6 @@ export default function Layout() {
 
   return (
     <div className="relative min-h-screen overflow-x-hidden bg-white text-slate-900 transition-colors duration-300 dark:bg-slate-950 dark:text-slate-100">
-      <BackgroundMusic />
-
       {/* ambient background */}
       <div className="pointer-events-none fixed inset-0 -z-10">
         <div className="absolute inset-0 bg-grid dark:opacity-40" />
