@@ -29,7 +29,7 @@ export default function DepositPage() {
         // GANTI URL INI sesuai backend lu
         // kalo vercel: /api/payment-channels
         // kalo php aeonfree: /api_tripay.php
-        const res = await fetch('/api/tripay.php');
+        const res = await fetch('/api/tripay/channels');
         const json = await res.json();
         if (json.data) setChannels(json.data.filter((c: TripayChannel) => c.active));
       } catch (e) {
