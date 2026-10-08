@@ -1,11 +1,8 @@
 name = "boosteryuk"
-type = "javascript"
+main = "src/index.ts"
 compatibility_date = "2024-12-01"
 
 [assets]
 directory = "./dist"
+binding = "ASSETS"
 not_found_handling = "single-page-application"
-
-# Variabel Tripay nanti lu isi di dashboard, bukan disini biar aman
-[vars]
-TRIPAY_MERCHANT_CODE = "TXXX"
