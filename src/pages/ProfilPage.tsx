@@ -16,6 +16,7 @@ import {
   PackageCheck,
   RefreshCw,
   Wallet,
+  Crown,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -82,6 +83,12 @@ export default function ProfilPage() {
                 <BadgeCheck className="h-3 w-3" strokeWidth={2.6} />
                 Google
               </span>
+              {user.plusActive && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 px-2.5 py-1 text-[10.5px] font-black text-slate-950 shadow-md shadow-amber-500/20 ring-1 ring-amber-400">
+                  <Crown className="h-3.5 w-3.5 fill-slate-950" strokeWidth={1.5} />
+                  VIP PLUS
+                </span>
+              )}
             </div>
             <p className="mt-1 text-[13px] text-slate-500 dark:text-slate-400">{user.email}</p>
             <p className="mt-0.5 text-[11.5px] font-semibold text-slate-400 dark:text-slate-500">
@@ -107,6 +114,27 @@ export default function ProfilPage() {
           ))}
         </div>
       </div>
+
+      {user.plusActive && (
+        <div className="mt-5 flex items-center gap-3.5 rounded-[22px] border border-amber-300/70 bg-gradient-to-r from-amber-500/10 via-amber-400/20 to-amber-500/10 p-4 shadow-lg shadow-amber-500/10 dark:border-amber-500/40">
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 via-amber-500 to-amber-600 text-slate-950 shadow-md">
+            <Crown className="h-6 w-6 fill-slate-950" strokeWidth={2.2} />
+          </span>
+          <div>
+            <div className="flex items-center gap-2">
+              <p className="font-display text-[15px] font-black tracking-tight text-amber-900 dark:text-amber-300">
+                Boosteryuk Plus Member VIP
+              </p>
+              <span className="rounded bg-amber-400/20 px-1.5 py-0.5 text-[10px] font-black uppercase text-amber-800 dark:text-amber-300">
+                Aktif
+              </span>
+            </div>
+            <p className="mt-0.5 text-[12px] font-medium text-amber-800/80 dark:text-amber-400/90">
+              Harga murah Rp 1.000/1K &amp; benefit premium aktif selamanya.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Details */}
       <div className="mt-5 overflow-hidden rounded-[28px] border border-slate-200 bg-white dark:border-slate-700/60 dark:bg-slate-800/80">

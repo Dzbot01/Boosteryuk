@@ -7,9 +7,8 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-
-const MUSIC_SRC = '/musik.mp3';
 const TOOLTIP_DELAY = 3000;
+const MUSIC_SRC = '/tes.mp3';
 
 interface MusicCtx {
   /** Whether the track is currently playing. */
@@ -59,6 +58,7 @@ export function MusicProvider({ children }: { children: ReactNode }) {
       audio.src = '';
       audioRef.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /* ---------- show the tooltip 3s after the first load ---------- */

@@ -3,22 +3,52 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- Open Graph / WhatsApp Preview -->
+    <meta property="og:title" content="Boosteryuk — Cek Status Booster" />
+    <meta property="og:description" content="Cek status pesanan dengan mudah dan cepat di Boosteryuk." />
+    <meta property="og:image" content="https://cekidku.my.id/banner.jpg?v=2" />
+    <meta property="og:image:type" content="image/jpeg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Boosteryuk — Cek Status Pesanan" />
+    <meta property="og:url" content="https://cekidku.my.id/" />
+    <meta property="og:type" content="website" />
+
+    <!-- Twitter / X Preview -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Boosteryuk — Cek Status Pesanan" />
+    <meta name="twitter:description" content="Cek status pesanan dengan mudah dan cepat di Boosteryuk." />
+    <meta name="twitter:image" content="https://cekidku.my.id/banner.jpg" />
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
-    <title>Boosteryuk — Cek Status Booster</title>
+    <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+    <title>Boosteryuk — Cek Status Pesanan</title>
+
     <script>
-      /* Apply saved theme before first paint. Default = light. */
+      /* 1. TANGKAP ERROR JS GLOBAL - MUNCUL ALERT */
+      window.addEventListener('error', function(e) {
+        alert('JS ERROR:\n' + e.message + '\nFile: ' + e.filename + '\nBaris: ' + e.lineno);
+      });
+      
+      /* 2. TANGKAP PROMISE REJECT */
+      window.addEventListener('unhandledrejection', function(e) {
+        alert('PROMISE ERROR:\n' + (e.reason?.message || e.reason));
+      });
+
+      /* 3. Apply saved theme before first paint. Default = light. */
       try {
         var t = localStorage.getItem('bt-theme');
         if (t === 'dark') document.documentElement.classList.add('dark');
         else document.documentElement.classList.remove('dark');
-      } catch (e) {}
+      } catch (e) {
+        alert('THEME ERROR: ' + e.message);
+      }
     </script>
   </head>
+
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>

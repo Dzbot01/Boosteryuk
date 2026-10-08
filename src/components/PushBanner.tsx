@@ -6,7 +6,7 @@ interface Props {
 
 export default function PushBanner({ onClose }: Props) {
   return (
-    <div className="sticky top-[60px] z-20 border-b border-cyan-200 bg-cyan-50/95 backdrop-blur-md dark:border-cyan-800/50 dark:bg-cyan-950/80">
+    <div className="sticky top-[60px] z-20 animate-slide-down border-b border-cyan-200 bg-cyan-50/95 backdrop-blur-md dark:border-cyan-800/50 dark:bg-cyan-950/80">
       <div className="mx-auto flex max-w-6xl items-start gap-3 px-4 py-3 sm:items-center sm:px-6">
         <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-cyan-600 text-white sm:mt-0">
           <BellRing className="h-4 w-4" strokeWidth={2.3} />

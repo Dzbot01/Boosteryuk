@@ -1,34 +1,14 @@
-/**
- * supabase.ts
- *
- * Single integration point with the Fayupedia API.
- *
- * Flow:  Browser  →  Supabase Edge Function  →  Fayupedia API
- *
- * The Edge Function (`fayupedia`) is deployed at the URL below and reads its
- * credentials from Supabase Edge Function secrets — they NEVER touch the
- * browser:
- *
- *   FAYUPEDIA_KEY       → the API key
- *   FAYUPEDIA_BASE_URL  → e.g. https://fayupedia.id/api
- *   FAYUPEDIA_ID        → the API id
- *
- * The browser only POSTs `{ action, id }` as JSON. The Edge Function maps
- * `action` to the correct path under FAYUPEDIA_BASE_URL, attaches the
- * FAYUPEDIA_ID + FAYUPEDIA_KEY, calls Fayupedia server-to-server, and
- * returns the raw JSON to us.
- */
-
-export const EDGE_FUNCTION_URL =
-  'https://zcxtbtleeeaeqeryiwea.supabase.co/functions/v1/fayupedia';
-
 export interface EdgePayload {
-  /** Which Fayupedia endpoint to hit relative to FAYUPEDIA_BASE_URL */
-  action: 'status' | 'refill' | 'refill_status';
-  /** ID(s) to query. Comma-separated for bulk status checks. */
-  id: string;
+  action: 'status' | 'refill' | 'refill_status' | 'services' | 'order';
+  id?: string;
+  serviceId?: string;
+  serviceName?: string;
+  link?: string;
+  quantity?: number;
+  price?: number;
+  comments?: string;
+  token?: string; 
 }
-
 export interface EdgeResponse<T = unknown> {
   ok: boolean;
   status: number;
@@ -36,84 +16,76 @@ export interface EdgeResponse<T = unknown> {
   error: string | null;
 }
 
-/**
- * Call the `fayupedia` Edge Function directly over HTTPS.
- *
- * Expected Edge Function body (Deno):
- * ```ts
- * Deno.serve(async (req) => {
- *   const cors = {
- *     'Access-Control-Allow-Origin': '*',
- *     'Content-Type': 'application/json',
- *   };
- *   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
- *
- *   const { action, id } = await req.json();
- *   const baseUrl = Deno.env.get('FAYUPEDIA_BASE_URL')!;
- *   const apiId   = Deno.env.get('FAYUPEDIA_ID')!;
- *   const apiKey  = Deno.env.get('FAYUPEDIA_KEY')!;
- *
- *   const endpoints: Record<string, string> = {
- *     status:        `${baseUrl}/status`,
- *     refill:        `${baseUrl}/refill`,
- *     refill_status: `${baseUrl}/refill/status`,
- *   };
- *   const endpoint = endpoints[action];
- *   if (!endpoint) return new Response(JSON.stringify({ error: 'unknown action' }), { status: 400, headers: cors });
- *
- *   const body = new URLSearchParams({ api_id: apiId, api_key: apiKey, id });
- *   const resp = await fetch(endpoint, {
- *     method: 'POST',
- *     headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
- *     body: body.toString(),
- *   });
- *   const text = await resp.text();
- *   return new Response(text, { status: resp.status, headers: cors });
- * });
- * ```
- */
+const API_BASE_URL = 'https://boosteryuk.com/api';
+
+const ENDPOINTS: Record<Exclude<EdgePayload['action'], undefined>, string> = {
+  status: `${API_BASE_URL}/status.php`,
+  refill: `${API_BASE_URL}/reffil.php`,
+  refill_status: `${API_BASE_URL}/reffil-status.php`,
+  services: `${API_BASE_URL}/services.php`,
+  order: `${API_BASE_URL}/order.php`,
+};
+
 export async function invokeProxy<T = unknown>(
   payload: EdgePayload
 ): Promise<EdgeResponse<T>> {
-  let data: T | null = null;
-  let error: string | null = null;
-  let httpStatus = 0;
+  const token = localStorage.getItem('token'); // ambil token login
+  const endpoint = ENDPOINTS[payload.action];
 
-  let res: Response;
+  if (!endpoint) {
+    return { ok: false, status: 400, data: null, error: `Action ${payload.action} tidak ditemukan` };
+  }
+
   try {
-    res = await fetch(EDGE_FUNCTION_URL, {
+    const body: any = { token };
+
+if (payload.action === 'order') {
+  body.service = payload.serviceId; 
+  body.serviceName = payload.serviceName; // TAMBAH
+  body.link = payload.link;         
+  body.quantity = payload.quantity;
+  body.price = payload.price;
+  if (payload.comments) body.comments = payload.comments;
+} else {
+      body.id = payload.id;
+    }
+
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Accept: 'application/json',
+        'Accept': 'application/json',
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
     });
+
+    const raw = await response.text();
+    let data: T | null = null;
+
+    try {
+      data = JSON.parse(raw) as T;
+    } catch {
+      return {
+        ok: false,
+        status: response.status,
+        data: null,
+        error: `Server balas HTML bukan JSON. Cek ${endpoint}`,
+      };
+    }
+
+    if (!response.ok) {
+      const result = data as { msg?: string; error?: string; message?: string };
+      return {
+        ok: false,
+        status: response.status,
+        data,
+        error: result?.msg || result?.error || result?.message || `HTTP ${response.status}`,
+      };
+    }
+
+    return { ok: true, status: response.status, data, error: null };
   } catch (err) {
     const e = err as Error;
-    return {
-      ok: false,
-      status: 0,
-      data: null,
-      error: `${e.name || 'Error'}: ${e.message || 'Gagal terhubung ke server.'}`,
-    };
+    return { ok: false, status: 0, data: null, error: e.message || 'Gagal terhubung ke server PHP.' };
   }
-
-  httpStatus = res.status;
-  const raw = await res.text();
-
-  // Try to parse JSON (the Edge Function should return the Fayupedia payload).
-  try {
-    const parsed = JSON.parse(raw) as T;
-    if (!res.ok) {
-      const anyParsed = parsed as unknown as { error?: string; msg?: string; message?: string };
-      error = anyParsed.error || anyParsed.msg || anyParsed.message || `HTTP ${res.status}`;
-    } else {
-      data = parsed;
-    }
-  } catch {
-    error = raw.trim().slice(0, 300) || `HTTP ${res.status} (respons non-JSON)`;
-  }
-
-  return { ok: error === null && data !== null, status: httpStatus, data, error };
 }

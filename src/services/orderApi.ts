@@ -1,18 +1,17 @@
 /**
  * orderApi.ts
  *
- * All Fayupedia API calls are proxied through a Supabase Edge Function called
- * `fayupedia`.  The credentials (FAYUPEDIA_ID, FAYUPEDIA_KEY,
- * FAYUPEDIA_BASE_URL) live exclusively in the Edge Function's environment —
+ * All Fayupedia API calls are proxied through PHP: status.php
+ * The credentials (API_ID, API_KEY, BASE_URL) live exclusively on the server —
  * they are never exposed to the browser.
  *
- * Browser  →  Supabase Edge Function (`fayupedia`)  →  Fayupedia API
+ * Browser → PHP Proxy (status.php) → Fayupedia API
  */
 
 import { invokeProxy } from '../supabase';
 
 /* ------------------------------------------------------------------ */
-/*  Types                                                              */
+/* Types */
 /* ------------------------------------------------------------------ */
 
 export interface OrderData {
@@ -78,22 +77,23 @@ interface MassResponse {
 type ApiResponse = SingleResponse & MassResponse;
 
 /* ------------------------------------------------------------------ */
-/*  Helpers                                                            */
+/* Helpers */
 /* ------------------------------------------------------------------ */
 
 const MAX_IDS = 50;
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://cekidku.my.id/api';
 
 function toNumber(value: unknown): number | null {
   if (value === null || value === undefined || value === '') return null;
   const n = Number(value);
-  return Number.isFinite(n) ? n : null;
+  return Number.isFinite(n)? n : null;
 }
 
 export function parseOrderIds(raw: string): { ids: string[]; invalid: string[] } {
   const parts = raw
-    .split(/[,;\n\r\t ]+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
+   .split(/[,;\n\r\t ]+/)
+   .map((s) => s.trim())
+   .filter(Boolean);
 
   const unique = Array.from(new Set(parts));
   const ids: string[] = [];
@@ -105,7 +105,7 @@ export function parseOrderIds(raw: string): { ids: string[]; invalid: string[] }
   }
 
   const overLimit = ids.slice(MAX_IDS).map((id) => `#${id} (melebihi batas ${MAX_IDS} ID)`);
-  return { ids: ids.slice(0, MAX_IDS), invalid: [...invalid, ...overLimit] };
+  return { ids: ids.slice(0, MAX_IDS), invalid: [...invalid,...overLimit] };
 }
 
 function normalize(status?: string): string {
@@ -125,8 +125,8 @@ function makeOrder(id: string, src: Record<string, unknown>, fallbackMsg?: strin
 
 function blankDebug(id: string): DebugInfo {
   return {
-    endpoint: 'supabase://fayupedia?action=status',
-    method: 'POST (Edge Function)',
+    endpoint: `${API_BASE_URL}/status.php`,
+    method: 'POST',
     requestBody: `id=${id}`,
     httpStatus: null,
     okHttp: null,
@@ -139,23 +139,23 @@ function blankDebug(id: string): DebugInfo {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Main request — via Supabase Edge Function                         */
+/* Main request — via PHP Proxy */
 /* ------------------------------------------------------------------ */
 
 export async function checkOrderStatus(rawInput: string): Promise<LookupResult> {
-  const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
-  const elapsed = () => Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0);
+  const t0 = typeof performance!== 'undefined'? performance.now() : Date.now();
+  const elapsed = () => Math.round((typeof performance!== 'undefined'? performance.now() : Date.now()) - t0);
 
   const { ids, invalid } = parseOrderIds(rawInput);
 
   const invalidFailures: LookupFailure[] = ids.length > 0
-    ? invalid.map((id) => ({ id, reason: 'Dilewati — format ID tidak valid (harus angka).' }))
+   ? invalid.map((id) => ({ id, reason: 'Dilewati — format ID tidak valid (harus angka).' }))
     : [];
 
   const finish = (r: Omit<LookupResult, 'debug'>, dbg: DebugInfo): LookupResult => ({
-    ...r,
-    failures: [...r.failures, ...invalidFailures],
-    debug: { ...dbg, durationMs: elapsed() },
+   ...r,
+    failures: [...r.failures,...invalidFailures],
+    debug: {...dbg, durationMs: elapsed() },
   });
 
   /* ---- Validate ---- */
@@ -164,7 +164,7 @@ export async function checkOrderStatus(rawInput: string): Promise<LookupResult> 
       {
         ok: false,
         message: invalid.length > 0
-          ? `ID tidak valid: ${invalid.join(', ')}. Harus angka, maks ${MAX_IDS} ID dipisah koma.`
+         ? `ID tidak valid: ${invalid.join(', ')}. Harus angka, maks ${MAX_IDS} ID dipisah koma.`
           : 'Masukkan minimal satu ID pesanan.',
         orders: [],
         failures: invalid.map((id) => ({
@@ -178,19 +178,19 @@ export async function checkOrderStatus(rawInput: string): Promise<LookupResult> 
 
   const idStr = ids.join(',');
   const debug: DebugInfo = {
-    ...blankDebug(idStr),
-    requestBody: `action=status&id=${idStr}`,
+   ...blankDebug(idStr),
+    requestBody: `id=${idStr}`,
   };
 
-  /* ---- Call Supabase Edge Function ---- */
+  /* ---- Call PHP Proxy via invokeProxy ---- */
   const edge = await invokeProxy<ApiResponse>({ action: 'status', id: idStr });
 
   debug.httpStatus = edge.status;
   debug.okHttp = edge.ok;
 
-  /* ---- Network / edge error ---- */
-  if (edge.error || !edge.data) {
-    const errMsg = edge.error || 'Edge Function tidak mengembalikan data.';
+  /* ---- Network / proxy error ---- */
+  if (edge.error ||!edge.data) {
+    const errMsg = edge.error || 'Proxy tidak mengembalikan data.';
     debug.networkError = errMsg;
     return finish(
       {
@@ -228,8 +228,8 @@ export async function checkOrderStatus(rawInput: string): Promise<LookupResult> 
 
     for (const id of ids) {
       const entry =
-        data.orders[id] ??
-        data.orders[String(Number(id))] ??
+        data.orders[id]??
+        data.orders[String(Number(id))]??
         data.orders[`#${id}`];
 
       if (entry && entry.order_status) {
@@ -250,7 +250,7 @@ export async function checkOrderStatus(rawInput: string): Promise<LookupResult> 
     return finish(
       {
         ok: orders.length > 0,
-        message: orders.length > 0 ? topMsg || 'Pesanan ditemukan.' : topMsg || 'Pesanan tidak ditemukan.',
+        message: orders.length > 0? topMsg || 'Pesanan ditemukan.' : topMsg || 'Pesanan tidak ditemukan.',
         orders,
         failures,
       },
@@ -260,8 +260,8 @@ export async function checkOrderStatus(rawInput: string): Promise<LookupResult> 
 
   /* ---- Single response ---- */
   if (data.order_status) {
-    const id = data.order_id !== undefined && data.order_id !== null
-      ? String(data.order_id)
+    const id = data.order_id!== undefined && data.order_id!== null
+     ? String(data.order_id)
       : ids[0];
     return finish(
       {
@@ -287,7 +287,7 @@ export async function checkOrderStatus(rawInput: string): Promise<LookupResult> 
 }
 
 /* ------------------------------------------------------------------ */
-/*  Presentation helpers                                               */
+/* Presentation helpers — TIDAK DIUBAH */
 /* ------------------------------------------------------------------ */
 
 export type Stage = 'Dibuat' | 'Di Proses' | 'Selesai';
@@ -334,13 +334,13 @@ export function formatCount(value: number | null): string {
 
 export function statusLabel(status: string): string {
   switch (normalize(status)) {
-    case 'pending':    return 'Menunggu';
+    case 'pending': return 'Menunggu';
     case 'processing': return 'Sedang diproses';
-    case 'partial':    return 'Sebagian selesai';
-    case 'completed':  return 'Selesai';
+    case 'partial': return 'Sebagian selesai';
+    case 'completed': return 'Selesai';
     case 'canceled':
-    case 'cancelled':  return 'Dibatalkan';
-    default:           return status;
+    case 'cancelled': return 'Dibatalkan';
+    default: return status;
   }
 }
 
@@ -353,20 +353,20 @@ export function timelineFor(status: string) {
       label: 'Pesanan dibuat',
       detail: 'Pesanan berhasil masuk ke sistem booster.',
       active: idx >= 0,
-      current: idx === 0 && !canceled,
+      current: idx === 0 &&!canceled,
     },
     {
       label: 'Sistem sedang mengirim',
       detail: canceled
-        ? 'Proses dihentikan sebelum pengiriman selesai.'
+       ? 'Proses dihentikan sebelum pengiriman selesai.'
         : 'Booster sedang dijalankan ke target media sosial.',
       active: idx >= 1,
-      current: idx === 1 && !canceled,
+      current: idx === 1 &&!canceled,
     },
     {
-      label: canceled ? 'Pesanan dibatalkan' : 'Pengiriman selesai',
+      label: canceled? 'Pesanan dibatalkan' : 'Pengiriman selesai',
       detail: canceled
-        ? 'Pesanan dihentikan. Hubungi admin bila butuh bantuan.'
+       ? 'Pesanan dihentikan. Hubungi admin bila butuh bantuan.'
         : 'Target booster telah terpenuhi sesuai pesanan.',
       active: idx >= 2 || canceled,
       current: idx === 2 || canceled,

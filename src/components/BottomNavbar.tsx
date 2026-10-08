@@ -9,7 +9,8 @@ import { useMusic } from '../context/MusicContext';
 export default function BottomNavbar() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const { pathname } = useLocation();
+  const location = useLocation();
+  const pathname = location?.pathname || "/";
   const { playing, toggle, showTooltip } = useMusic();
   const [showFAQ, setShowFAQ] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -44,26 +45,24 @@ export default function BottomNavbar() {
               title={label}
               className={`group relative flex h-10 w-10 items-center justify-center rounded-full transition-all duration-250 active:scale-90 ${
                 on
-                  ? 'bg-cyan-600 text-white shadow-md shadow-cyan-600/30'
+                ? 'bg-cyan-600 text-white shadow-md shadow-cyan-600/30'
                   : 'text-slate-500 hover:bg-slate-100 hover:text-cyan-700 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-cyan-400'
               }`}
             >
               <Icon
                 className={`h-[18px] w-[18px] transition-transform duration-500 ${
-                  key === 'settings' ? 'group-hover:rotate-90' : ''
+                  key === 'settings'? 'group-hover:rotate-90' : ''
                 }`}
                 strokeWidth={2}
               />
             </button>
           ))}
 
-          {/* ---------- Music toggle ---------- */}
           <div className="relative">
-            {/* onboarding tooltip */}
             {showTooltip && (
               <div className="absolute bottom-full left-1/2 z-10 mb-3 w-max max-w-[220px] -translate-x-1/2 animate-fade-in rounded-xl bg-slate-900 px-3.5 py-2.5 text-center shadow-xl dark:bg-slate-100">
                 <p className="text-[11.5px] font-bold leading-snug text-white dark:text-slate-900">
-                  Putar musik biar makin santai 🎵
+                  Gunakan Musik
                 </p>
                 <span className="absolute -bottom-1 left-1/2 h-2.5 w-2.5 -translate-x-1/2 rotate-45 bg-slate-900 dark:bg-slate-100" />
               </div>
@@ -71,28 +70,24 @@ export default function BottomNavbar() {
 
             <button
               onClick={toggle}
-              aria-label={playing ? 'Hentikan musik' : 'Putar musik'}
+              aria-label={playing? 'Hentikan musik' : 'Putar musik'}
               aria-pressed={playing}
-              title={playing ? 'Hentikan musik' : 'Putar musik'}
+              title={playing? 'Hentikan musik' : 'Putar musik'}
               className={`group relative flex h-10 w-10 items-center justify-center rounded-full transition-all duration-250 active:scale-90 ${
                 playing
-                  ? 'bg-cyan-600 text-white shadow-md shadow-cyan-600/30'
+                ? 'bg-cyan-600 text-white shadow-md shadow-cyan-600/30'
                   : 'text-slate-500 hover:bg-slate-100 hover:text-cyan-700 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-cyan-400'
               }`}
             >
-              {playing ? (
+              {playing? (
                 <Pause className="h-[18px] w-[18px] fill-current" strokeWidth={2} />
               ) : (
                 <Music className="h-[18px] w-[18px] transition-transform duration-300 group-hover:scale-110" strokeWidth={2} />
               )}
-
-              {/* pulsing ring while playing */}
               {playing && (
                 <span className="pointer-events-none absolute inset-0 rounded-full text-cyan-400 pulse-ring" />
               )}
-
-              {/* attention dot before the first interaction */}
-              {showTooltip && !playing && (
+              {showTooltip &&!playing && (
                 <span className="absolute -right-0.5 -top-0.5 flex h-2.5 w-2.5">
                   <span className="absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75 pulse-ring text-cyan-400" />
                   <span className="relative h-2.5 w-2.5 rounded-full border-2 border-white bg-cyan-500 dark:border-slate-800" />
@@ -101,7 +96,6 @@ export default function BottomNavbar() {
             </button>
           </div>
 
-          {/* ---------- Profile — visible after login ---------- */}
           {user && (
             <>
               <span className="mx-0.5 h-7 w-px bg-slate-200 dark:bg-slate-700" />
@@ -110,12 +104,14 @@ export default function BottomNavbar() {
                 aria-label="Profil"
                 title="Profil"
                 className={`group relative flex h-10 w-10 items-center justify-center rounded-full font-display text-[12px] font-extrabold transition-all duration-250 active:scale-90 ${
-                  profileActive
+                  user.plusActive
+                  ? 'bg-gradient-to-br from-amber-400 via-amber-500 to-amber-600 text-slate-950 shadow-md shadow-amber-500/30 ring-2 ring-amber-300'
+                    : profileActive
                     ? 'bg-gradient-to-br from-cyan-500 to-cyan-700 text-white shadow-md shadow-cyan-600/30'
-                    : 'text-cyan-700 hover:bg-cyan-50 dark:text-cyan-400 dark:hover:bg-cyan-900/30'
+                      : 'text-cyan-700 hover:bg-cyan-50 dark:text-cyan-400 dark:hover:bg-cyan-900/30'
                 }`}
               >
-                {profileActive ? (
+                {user.plusActive || profileActive? (
                   user.initials
                 ) : (
                   <span className="flex h-7 w-7 items-center justify-center rounded-full bg-cyan-100 text-cyan-700 ring-1 ring-cyan-200 transition-transform duration-300 group-hover:scale-110 dark:bg-cyan-900/40 dark:text-cyan-400 dark:ring-cyan-800/50">

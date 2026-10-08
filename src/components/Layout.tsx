@@ -1,20 +1,35 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import Header from './Header';
 import SideMenu from './SideMenu';
 import BottomNavbar from './BottomNavbar';
 import PushBanner from './PushBanner';
+import InfoModal from './InfoModal';
+import Calculator from './Calculator';
+
+const BANNER_DELAY = 4000;
 
 export default function Layout() {
   const [menuOpen, setMenuOpen] = useState(false);
-  const [notifUnread, setNotifUnread] = useState(true);
-  const [showPushBanner, setShowPushBanner] = useState(true);
+  /* Identical reveal pattern to the music tooltip: hidden on first paint,
+     fired once after a fixed delay, permanently gone once dismissed. */
+  const [showPushBanner, setShowPushBanner] = useState(false);
+  const bannerDismissed = useRef(false);
   const { pathname } = useLocation();
 
-  // Opening the notification page marks everything as read.
+  // Reveal the banner exactly once, 4s after the site loads — never on first paint.
   useEffect(() => {
-    if (pathname === '/notifikasi') setNotifUnread(false);
-  }, [pathname]);
+    if (bannerDismissed.current) return;
+    const timer = window.setTimeout(() => {
+      if (!bannerDismissed.current) setShowPushBanner(true);
+    }, BANNER_DELAY);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const dismissBanner = useCallback(() => {
+    bannerDismissed.current = true;
+    setShowPushBanner(false);
+  }, []);
 
   // Reset scroll position when the route changes (except for in-page anchors).
   useEffect(() => {
@@ -34,17 +49,22 @@ export default function Layout() {
       <Header onMenuClick={() => setMenuOpen(true)} />
       {/* spacer for fixed header */}
       <div className="h-[60px]" />
-      {showPushBanner && <PushBanner onClose={() => setShowPushBanner(false)} />}
+      {showPushBanner && <PushBanner onClose={dismissBanner} />}
 
       <SideMenu
         isOpen={menuOpen}
         onClose={() => setMenuOpen(false)}
-        notifUnread={notifUnread}
       />
 
       <Outlet />
 
       <BottomNavbar />
+
+      {/* Floating info modal — reappears on each route change / refresh */}
+      <InfoModal />
+
+      {/* Floating calculator */}
+      <Calculator />
     </div>
   );
 }

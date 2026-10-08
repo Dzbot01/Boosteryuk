@@ -1,63 +1,154 @@
-import { createContext, useContext, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
 
-export interface AuthUser {
-  id: string;
+const API_URL = import.meta.env.VITE_API_URL || 'https://boosteryuk.com/api';
+
+type User = {
+  id: number;
   name: string;
+  username: string;
   email: string;
   initials: string;
   joined: string;
   phone: string;
   timezone: string;
+  balance: number;
+  role: string;
+  plusActive: boolean;
+  token?: string; // <-- TAMBAH INI
 }
 
-interface AuthCtx {
-  user: AuthUser | null;
-  pending: boolean;
-  loginWithGoogle: () => Promise<void>;
+type AuthContextType = {
+  user: User | null;
+  loading: boolean;
+  isAdmin: boolean;
+  login: (username: string, password: string) => Promise<{ok: boolean, message?: string}>;
+  register: (username: string, email: string, password: string) => Promise<{ok: boolean, message?: string}>;
   logout: () => void;
+  refresh: () => Promise<void>;
+  updateUser: (data: Partial<User>) => Promise<{ok: boolean, message?: string}>;
+  topUp: (amount: number) => Promise<void>; // <-- TAMBAH
+  activatePlus: () => Promise<void>; // <-- TAMBAH
 }
 
-const AuthContext = createContext<AuthCtx>({
-  user: null,
-  pending: false,
-  loginWithGoogle: async () => {},
-  logout: () => {},
-});
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-/** Simulated Google account used for the demo login flow. */
-const DEMO_USER: AuthUser = {
-  id: 'USR-88214',
-  name: 'Budi Santoso',
-  email: 'budi.santoso@gmail.com',
-  initials: 'BS',
-  joined: '14 Maret 2024',
-  phone: '+62 812-3456-7890',
-  timezone: 'WIB (GMT+7)',
-};
+export function AuthProvider({children}: {children: React.ReactNode}){
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
 
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [pending, setPending] = useState(false);
+  const isAdmin = user?.role === 'admin';
 
-  const loginWithGoogle = async () => {
-    setPending(true);
-    // Simulate the Google OAuth handshake.
-    await new Promise((resolve) => setTimeout(resolve, 900));
-    setUser(DEMO_USER);
-    setPending(false);
-  };
+  useEffect(() => {
+    refresh();
+  }, []);
 
-  const logout = () => setUser(null);
+const refresh = async () => {
+  setLoading(true);
+  const token = localStorage.getItem('token');
 
-  return (
-    <AuthContext.Provider value={{ user, pending, loginWithGoogle, logout }}>
-      {children}
-    </AuthContext.Provider>
-  );
+  if(!token) { 
+    setUser(null);
+    setLoading(false); 
+    return; 
+  }
+  
+  try{
+    const res = await fetch(`${API_URL}/me.php?token=${token}`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    
+    const data = await res.json();
+    
+    if(!res.ok || !data.ok){
+      localStorage.removeItem('token');
+      setUser(null);
+      return;
+    }
+    
+    setUser({ ...data.user, token });
+  }catch(err){
+    console.error('Auth refresh error:', err);
+    setUser(null);
+    localStorage.removeItem('token');
+  } finally {
+    setLoading(false);
+  }
 }
 
-export function useAuth() {
-  return useContext(AuthContext);
+  const login = async (username: string, password: string) => {
+    try{
+      const res = await fetch(`${API_URL}/login.php`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({email: username, password})
+      });
+      const data = await res.json();
+      if(data.ok){
+        localStorage.setItem('token', data.token);
+        setUser({ ...data.user, token: data.token });
+      }
+      return data;
+    }catch{
+      return {ok: false, message: 'Gagal konek ke server'};
+    }
+  }
+
+  const register = async (username: string, email: string, password: string) => {
+    try{
+      const res = await fetch(`${API_URL}/register.php`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({username, email, password})
+      });
+      return res.json();
+    }catch{
+      return {ok: false, message: 'Gagal konek ke server'};
+    }
+  }
+
+  // INI YANG BARU - biar ga error di UpgradePlusPage
+  const topUp = async (amount: number) => {
+    if(!user) return;
+    setUser(prev => prev ? {...prev, balance: prev.balance + amount} : null);
+    await refresh(); // sync ke server
+  }
+
+  const activatePlus = async () => {
+    if(!user) return;
+    setUser(prev => prev ? {...prev, plusActive: true} : null);
+    await refresh(); // sync ke server
+  }
+
+  const updateUser = async (data: Partial<User>) => {
+    const token = localStorage.getItem('token');
+    if(!token) return {ok: false, message: 'Belum login'};
+    try{
+      const res = await fetch(`${API_URL}/update_user.php`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json', 'Authorization': `Bearer ${token}`},
+        body: JSON.stringify(data)
+      });
+      const result = await res.json();
+      if(result.ok){
+        await refresh(); 
+      }
+      return result;
+    }catch{
+      return {ok: false, message: 'Pendaftaran sedang ditutup, coba lagi nanti atau refresh halaman'};
+    }
+  }
+
+  const logout = () => {
+    localStorage.removeItem('token');
+    setUser(null);
+  }
+
+  return <AuthContext.Provider value={{user, loading, isAdmin, login, register, logout, refresh, updateUser, topUp, activatePlus}}>{children}</AuthContext.Provider>
 }
 
-export const GOOGLE_LOGO = 'https://cdn.simpleicons.org/google/4285F4';
+export const useAuth = () => {
+  const ctx = useContext(AuthContext);
+  if(!ctx) throw new Error('useAuth must be used within AuthProvider');
+  return ctx;
+}
