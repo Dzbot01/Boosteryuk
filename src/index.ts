@@ -1,76 +1,74 @@
-export default {
-  async fetch(request: Request, env: any): Promise<Response> {
-    const corsHeaders = {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization, X-CALLBACK-SIGNATURE"
-    };
-    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
 
-    const url = new URL(request.url);
 
-    try {
-      // LIST
-      if (url.pathname.includes("/channels") && request.method === "GET") {
-        const res = await fetch("https://tripay.co.id/api/merchant/payment-channel", {
-          headers: { Authorization: `Bearer ${env.TRIPAY_API_KEY}` }
-        });
-        const data = await res.text();
-        return new Response(data, { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      }
+╭─────────────────────────────────╮
+│ Did you mean "wrangler deploy"? │
+╰─────────────────────────────────╯
 
-      // CREATE - TERIMA 2 ROUTE
-      if ((url.pathname.includes("/create-transaction") || url.pathname.endsWith("/create")) && request.method === "POST") {
-        const body: any = await request.json();
-        const amount = parseInt(body.amount);
-        const merchant_ref = body.merchant_ref || body.order_id || `BY-${Date.now()}`;
-        let method = (body.method || "").toUpperCase();
-        if (method === "QRIS2") method = "QRIS";
+wrangler
 
-        // === FIX SIGNATURE DISINI ===
-        // Tripay: merchant_code + merchant_ref + amount
-        const rawSignature = `${env.TRIPAY_MERCHANT_CODE}${merchant_ref}${amount}`;
-        
-        const enc = new TextEncoder();
-        const key = await crypto.subtle.importKey("raw", enc.encode(env.TRIPAY_PRIVATE_KEY), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-        const sigBuf = await crypto.subtle.sign("HMAC", key, enc.encode(rawSignature));
-        const signature = Array.from(new Uint8Array(sigBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+COMMANDS
+  wrangler docs [search..]        📚 Open Wrangler's command documentation in your browser
+  wrangler complete [shell]       ⌨️ Generate and handle shell completions
 
-        const payload = {
-          method,
-          merchant_ref,
-          amount,
-          customer_name: body.customer_name || "Boosteryuk User",
-          customer_email: body.customer_email || "user@boosteryuk.com",
-          customer_phone: body.customer_phone || "08123456789",
-          order_items: [{ sku: "DEPOSIT", name: "Deposit", price: amount, quantity: 1 }],
-          callback_url: "https://boosteryuk.boosteryukid.workers.dev/api/tripay/callback",
-          return_url: "https://boosteryuk.com/deposit",
-          expired_time: Math.floor(Date.now()/1000) + 86400,
-          signature
-        };
+  wrangler email                  Manage Cloudflare Email services [open beta]
 
-        console.log("Payload:", JSON.stringify(payload));
-        console.log("RawSig:", rawSignature);
+ACCOUNT
+  wrangler auth                   🔐 Manage authentication
+  wrangler login                  🔓 Login to Cloudflare
+  wrangler logout                 🚪 Logout from Cloudflare
+  wrangler whoami                 🕵️ Retrieve your user information
 
-        const tripayRes = await fetch("https://tripay.co.id/api/transaction/create", {
-          method: "POST",
-          headers: { "Authorization": `Bearer ${env.TRIPAY_API_KEY}`, "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
-        });
+COMPUTE & AI
+  wrangler agent-memory           🧠 Manage Agent Memory namespaces [private beta]
+  wrangler ai                     🤖 Manage AI models
+  wrangler ai-search              🔍 Manage AI Search instances [open beta]
+  wrangler browser                🌐 Manage Browser Run sessions [open beta]
+  wrangler containers             📦 Manage Containers
+  wrangler delete [name]          🗑️ Delete a Worker from Cloudflare
+  wrangler deploy [path]          🆙 Deploy a Worker to Cloudflare
+  wrangler deployments            🚢 List and view the current and past deployments for your Worker
+  wrangler dev [script]           👂 Start a local server for developing your Worker
+  wrangler dispatch-namespace     🏗️ Manage dispatch namespaces
+  wrangler flagship               🚩 Manage Flagship apps and feature flags [open beta]
+  wrangler init [name]            📥 Initialize a basic Worker
+  wrangler pages                  ⚡️ Configure Cloudflare Pages
+  wrangler preview [script]       👀 Create a Preview deployment of the current Worker [open beta]
+  wrangler queues                 📬 Manage Workers Queues
+  wrangler rollback [version-id]  🔙 Rollback a deployment for a Worker
+  wrangler secret                 🤫 Generate a secret that can be referenced in a Worker
+  wrangler setup                  🪄 Setup a project to work on Cloudflare
+  wrangler tail [worker]          🦚 Start a log tailing session for a Worker
+  wrangler triggers               🎯 Updates the triggers of your current deployment [experimental]
+  wrangler types [path]           📝 Generate types from your Worker configuration
+  wrangler versions               🫧 List, view, upload and deploy Versions of your Worker to Cloudflare
+  wrangler vpc                    🌐 Manage VPC [open beta]
+  wrangler workflows              🔁 Manage Workflows
 
-        const result = await tripayRes.text();
-        console.log("Tripay result:", result);
-        return new Response(result, { status: tripayRes.status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      }
+STORAGE & DATABASES
+  wrangler artifacts              🧱 Manage Artifacts namespaces and repos [open beta]
+  wrangler basin                  🏞️ Manage Basin products
+  wrangler d1                     🗄️ Manage Workers D1 databases
+  wrangler hyperdrive             🚀 Manage Hyperdrive databases
+  wrangler k2                     ⛰️ Manage K2 streams [open beta]
+  wrangler kv                     🗂️ Manage Workers KV Namespaces
+  wrangler r2                     📦 Manage R2 buckets & objects
+  wrangler secrets-store          🔐 Manage the Secrets Store [open beta]
+  wrangler vectorize              🧮 Manage Vectorize indexes
 
-      if (url.pathname.includes("/callback")) {
-        return new Response(JSON.stringify({ success: true }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      }
+NETWORKING & SECURITY
+  wrangler cert                   🪪 Manage client mTLS certificates and CA certificate chains used for secured connections [open beta]
+  wrangler mtls-certificate       🪪 Manage certificates used for mTLS connections
+  wrangler tunnel                 🚇 Manage Cloudflare Tunnels [experimental]
+  wrangler turnstile              🛡️ Manage Turnstile widgets [alpha]
 
-      return new Response(JSON.stringify({ error: "Not found " + url.pathname }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    } catch (e: any) {
-      return new Response(JSON.stringify({ success: false, error: e.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-    }
-  }
-}
+GLOBAL FLAGS
+  -c, --config          Path to Wrangler configuration file  [string]
+      --cwd             Run as if Wrangler was started in the specified directory instead of the current working directory  [string]
+  -e, --env             Environment to use for operations, and for selecting .env and .dev.vars files  [string]
+      --env-file        Path to an .env file to load - can be specified multiple times - values from earlier files are overridden by values in later files  [array]
+  -h, --help            Show help  [boolean]
+      --install-skills  Install Cloudflare skills for detected AI coding agents before running the command  [boolean] [default: false]
+      --profile         Use a specific auth profile  [string]
+  -v, --version         Show version number  [boolean]
+
+Please report any issues to https://github.com/cloudflare/workers-sdk/issues/new/choose
