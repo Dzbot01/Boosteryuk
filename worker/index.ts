@@ -27,7 +27,40 @@ export default {
         const txt=await r.text();
         return new Response(txt,{status:r.status,headers:{...cors,"Content-Type":"application/json"}});
       }
-      return new Response(JSON.stringify({ok:true}),{headers:{...cors,"Content-Type":"application/json"}});
+
+      // === CALLBACK BARU ===
+      if(url.pathname.includes("/callback")){
+        const bodyText = await request.text();
+        let json;
+        try{ json = JSON.parse(bodyText); }catch{ json = {}; }
+        
+        // Selalu balikin 200 ke Tripay dulu biar gak retry terus
+        // Abis itu forward ke aeonfree
+        try{
+          // GANTI DOMAIN AEONFREE LU DISINI
+          const aeonfreeUrl = "https://boosteryuk.com/api/callback.php";
+          
+          await fetch(aeonfreeUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Callback-Secret": String(env.CALLBACK_SECRET||"BOOSTERYUK123"),
+              "X-Tripay-Signature": request.headers.get("x-callback-signature")||""
+            },
+            body: bodyText
+          });
+        }catch(e){
+          // kalau forward gagal jangan bikin tripay retry, tetap log aja
+          console.log("Forward error:", e.message);
+        }
+
+        // Kalau lu mau debug, bisa simpan log di KV atau console
+        console.log("Tripay Callback:", bodyText);
+
+        return new Response(JSON.stringify({success:true}),{headers:{...cors,"Content-Type":"application/json"}});
+      }
+
+      return new Response(JSON.stringify({ok:true, message:"Worker Active"}),{headers:{...cors,"Content-Type":"application/json"}});
     }catch(e){return new Response(JSON.stringify({error:e.message}),{status:500,headers:{...cors,"Content-Type":"application/json"}});}
   }
 }
