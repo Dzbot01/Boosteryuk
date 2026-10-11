@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "callback.php": {
+      "includeFiles": "**"
+    }
+  }
+}
