@@ -1,10 +1,9 @@
 export default {
   async fetch(request: Request, env: any, ctx: any) {
     const cors = {
-      "Access-Control-Allow-Origin": "https://boosteryuk.com",
+      "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, X-Callback-Signature, X-Callback-Secret, Authorization, X-Callback-Event",
-      "Access-Control-Max-Age": "86400"
+      "Access-Control-Allow-Headers": "Content-Type, X-Callback-Signature, X-Callback-Secret"
     };
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: cors });
@@ -19,27 +18,20 @@ export default {
           headers: { Authorization: "Bearer " + String(env.TRIPAY_API_KEY).trim() }
         });
         const txt = await r.text();
-        return new Response(txt, { status: r.status, headers: {...cors, "Content-Type": "application/json" } });
+        return new Response(txt, { status: r.status, headers: { ...cors, "Content-Type": "application/json" } });
       }
 
-      // 2. CREATE TRANSACTION - FIXED
+      // 2. CREATE TRANSACTION
       if (url.pathname.includes("/create")) {
         const b: any = await request.json();
         const amount = parseInt(b.amount);
-        
-        // FIX UTAMA: support camelCase & snake_case
-        const merchant_ref = String(b.merchant_ref || b.merchantRef || "BY-" + Date.now()).trim();
-        const customer_name = String(b.customer_name || b.customerName || "User").trim();
-        const customer_email = String(b.customer_email || b.customerEmail || "user@boosteryuk.com").trim();
-
+        const merchant_ref = String(b.merchant_ref || "BY-" + Date.now()).trim();
         const merchant_code = String(env.TRIPAY_MERCHANT_CODE).trim();
         const privateKey = String(env.TRIPAY_PRIVATE_KEY).trim();
         const apiKey = String(env.TRIPAY_API_KEY).trim();
-
+        
         let method = String(b.method || "QRIS").trim().toUpperCase();
         if (method === "QRIS2") method = "QRIS";
-
-        console.log("CREATE:", merchant_ref, "USER:", b.user_id, amount, method);
 
         const raw = merchant_code + merchant_ref + amount;
         const enc = new TextEncoder();
@@ -51,12 +43,12 @@ export default {
           method,
           merchant_ref,
           amount,
-          customer_name,
-          customer_email,
-          customer_phone: b.customer_phone || b.customerPhone || "08123456789",
-          order_items: [{ sku: "DEP", name: "Deposit Saldo", price: amount, quantity: 1 }],
-          callback_url: "https://api.boosteryuk.com/api/tripay/callback",
-          return_url: "https://boosteryuk.com/deposit",
+          customer_name: b.customer_name || "User",
+          customer_email: b.customer_email || "user@boosteryuk.com",
+          customer_phone: "08123456789",
+          order_items: [{ sku: "DEP", name: "Deposit", price: amount, quantity: 1 }],
+          callback_url: "https://boosteryuk.boosteryukid.workers.dev/api/tripay/callback",
+          return_url: "https://boosteryuk.com",
           expired_time: Math.floor(Date.now() / 1000) + 86400,
           signature
         };
@@ -67,53 +59,56 @@ export default {
           body: JSON.stringify(payload)
         });
         const txt = await r.text();
-        return new Response(txt, { status: r.status, headers: {...cors, "Content-Type": "application/json" } });
+        return new Response(txt, { status: r.status, headers: { ...cors, "Content-Type": "application/json" } });
       }
 
-      // 3. CALLBACK - FORWARD KE PHP
+      // 3. CALLBACK - FIX ANTI 520 AEONFREE
       if (url.pathname.includes("/callback")) {
-        if (request.method === "GET") {
-          return new Response(JSON.stringify({ success: true, msg: "callback active on worker api.boosteryuk.com" }), { headers: {...cors, "Content-Type": "application/json" } });
-        }
-        
         const bodyText = await request.text();
         const tripaySignature = request.headers.get("x-callback-signature") || "";
-        let parsed: any = {};
-        try { parsed = JSON.parse(bodyText); } catch {}
-        const inner = parsed.data || parsed;
-
-        console.log("Tripay Callback:", inner.merchant_ref, inner.status);
+        console.log("Tripay Callback:", bodyText);
 
         const forwardTask = async () => {
           try {
-            // Forward ke file PHP yang work, bawa secret + signature
-            const f = await fetch("https://boosteryuk.com/api/callback.php", {
+            const aeonfreeUrl = "https://boosteryuk.com/api/callback.php";
+            const f = await fetch(aeonfreeUrl, {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
-                "X-Callback-Signature": tripaySignature,
-                "X-Callback-Secret": "BOOSTERYUK123",
-                "X-Callback-Event": request.headers.get("x-callback-event") || "payment_status",
-                "User-Agent": "Tripay-Callback/1.0"
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                "X-Callback-Secret": String(env.CALLBACK_SECRET || "BOOSTERYUK123"),
+                "X-Tripay-Signature": tripaySignature,
+                "Accept": "application/json, text/plain, */*"
               },
               body: bodyText
             });
-            const txt = await f.text();
-            console.log("Forward to callback.php:", f.status, txt);
-          } catch (e: any) { 
-            console.log("Forward Error:", e.message); 
+            const resText = await f.text();
+            console.log("Forward to Aeonfree:", f.status, resText);
+          } catch (e: any) {
+            console.log("Forward error:", e.message);
           }
         };
 
-        if (ctx?.waitUntil) ctx.waitUntil(forwardTask());
-        else await forwardTask();
+        if (ctx && ctx.waitUntil) {
+          ctx.waitUntil(forwardTask());
+        } else {
+          await forwardTask();
+        }
 
-        return new Response(JSON.stringify({ success: true }), { headers: {...cors, "Content-Type": "application/json" } });
+        return new Response(JSON.stringify({ success: true }), {
+          headers: { ...cors, "Content-Type": "application/json" }
+        });
       }
 
-      return new Response(JSON.stringify({ ok: true, message: "Worker Active" }), { headers: {...cors, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ ok: true, message: "Worker Active" }), {
+        headers: { ...cors, "Content-Type": "application/json" }
+      });
+
     } catch (e: any) {
-      return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: {...cors, "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: e.message }), {
+        status: 500,
+        headers: { ...cors, "Content-Type": "application/json" }
+      });
     }
   }
 }
