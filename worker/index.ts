@@ -55,7 +55,7 @@ export default {
           customer_email,
           customer_phone: b.customer_phone || b.customerPhone || "08123456789",
           order_items: [{ sku: "DEP", name: "Deposit Saldo", price: amount, quantity: 1 }],
-          callback_url: "https://boosteryuk.com/api/callback.php",
+          callback_url: "https://api.boosteryuk.com/api/callback.php",
           return_url: "https://boosteryuk.com/deposit",
           expired_time: Math.floor(Date.now() / 1000) + 86400,
           signature
