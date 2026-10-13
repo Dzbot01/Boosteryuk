@@ -70,29 +70,36 @@ export default {
         return new Response(txt, { status: r.status, headers: {...cors, "Content-Type": "application/json" } });
       }
 
-      // 3. CALLBACK - FORWARD KE PHP YANG BENER
+      // 3. CALLBACK - FORWARD KE PHP
       if (url.pathname.includes("/callback")) {
         if (request.method === "GET") {
-          return new Response(JSON.stringify({ success: true, msg: "callback active" }), { headers: {...cors, "Content-Type": "application/json" } });
+          return new Response(JSON.stringify({ success: true, msg: "callback active on worker api.boosteryuk.com" }), { headers: {...cors, "Content-Type": "application/json" } });
         }
         
         const bodyText = await request.text();
         const tripaySignature = request.headers.get("x-callback-signature") || "";
+        let parsed: any = {};
+        try { parsed = JSON.parse(bodyText); } catch {}
+        const inner = parsed.data || parsed;
+
+        console.log("Tripay Callback:", inner.merchant_ref, inner.status);
 
         const forwardTask = async () => {
           try {
-            // FIX: forward ke api.boosteryuk.com yang proven work, BUKAN ke boosteryuk.com
-            const f = await fetch("https://api.boosteryuk.com/api/tripay/callback", {
+            // Forward ke file PHP yang work, bawa secret + signature
+            const f = await fetch("https://boosteryuk.com/api/callback.php", {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
                 "X-Callback-Signature": tripaySignature,
                 "X-Callback-Secret": "BOOSTERYUK123",
                 "X-Callback-Event": request.headers.get("x-callback-event") || "payment_status",
+                "User-Agent": "Tripay-Callback/1.0"
               },
               body: bodyText
             });
-            console.log("Forward to api/tripay/callback:", f.status, await f.text());
+            const txt = await f.text();
+            console.log("Forward to callback.php:", f.status, txt);
           } catch (e: any) { 
             console.log("Forward Error:", e.message); 
           }
