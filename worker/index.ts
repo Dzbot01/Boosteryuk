@@ -64,35 +64,46 @@ export default {
         return new Response(txt, { status: r.status, headers: {...cors, "Content-Type": "application/json" } });
       }
 
-      // 3. CALLBACK
-      if (url.pathname.includes("/callback")) {
-        if (request.method === "GET") {
-          return new Response(JSON.stringify({ success: true, msg: "callback active" }), { headers: {...cors, "Content-Type": "application/json" } });
-        }
-        const bodyText = await request.text();
-        const tripaySignature = request.headers.get("x-callback-signature") || "";
+// 3. CALLBACK - FIXED
+if (url.pathname.includes("/callback")) {
+  if (request.method === "GET") {
+    return new Response(JSON.stringify({ success: true, msg: "callback active" }), { headers: {...cors, "Content-Type": "application/json" } });
+  }
+  
+  const bodyText = await request.text();
+  const tripaySignature = request.headers.get("x-callback-signature") || "";
 
-        const forwardTask = async () => {
-          try {
-            const f = await fetch("https://boosteryuk.com/api/callback.php", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "X-Callback-Secret": String(env.CALLBACK_SECRET || "BOOSTERYUK123"),
-                "X-Tripay-Signature": tripaySignature
-              },
-              body: bodyText
-            });
-            console.log("Forward:", f.status, await f.text());
-          } catch (e: any) { console.log(e.message); }
-        };
+  // LOG BUAT DEBUG - BISA LIAT DI CLOUDFLARE WORKER LOG
+  console.log("TRIPAY CALLBACK RECEIVED:", bodyText);
+  console.log("SIGNATURE:", tripaySignature);
 
-        if (ctx?.waitUntil) ctx.waitUntil(forwardTask());
-        else await forwardTask();
+  const forwardTask = async () => {
+    try {
+      const f = await fetch("https://boosteryuk.com/api/callback.php", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          // INI YANG BENER - JANGAN DI GANTI NAMANYA
+          "X-Callback-Signature": tripaySignature,
+          "X-Callback-Event": request.headers.get("x-callback-event") || "payment_status",
+          "X-Callback-Secret": String(env.CALLBACK_SECRET || "BOOSTERYUK123"),
+          "User-Agent": "Tripay-Callback"
+        },
+        body: bodyText
+      });
+      const resText = await f.text();
+      console.log("Forward to callback.php:", f.status, resText);
+    } catch (e: any) { 
+      console.log("Forward Error:", e.message); 
+    }
+  };
 
-        return new Response(JSON.stringify({ success: true }), { headers: {...cors, "Content-Type": "application/json" } });
-      }
+  if (ctx?.waitUntil) ctx.waitUntil(forwardTask());
+  else await forwardTask();
+
+  // HARUS BALIKIN 200 SECEPATNYA KE TRIPAY
+  return new Response(JSON.stringify({ success: true }), { headers: {...cors, "Content-Type": "application/json" } });
+}
 
       return new Response(JSON.stringify({ ok: true, message: "Worker Active" }), { headers: {...cors, "Content-Type": "application/json" } });
     } catch (e: any) {
