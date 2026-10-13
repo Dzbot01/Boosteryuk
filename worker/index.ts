@@ -3,7 +3,7 @@ export default {
     const cors = {
       "Access-Control-Allow-Origin": "https://boosteryuk.com",
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, X-Callback-Signature, X-Callback-Secret, Authorization",
+      "Access-Control-Allow-Headers": "Content-Type, X-Callback-Signature, X-Callback-Secret, Authorization, X-Callback-Event",
       "Access-Control-Max-Age": "86400"
     };
     if (request.method === "OPTIONS") {
@@ -22,17 +22,24 @@ export default {
         return new Response(txt, { status: r.status, headers: {...cors, "Content-Type": "application/json" } });
       }
 
-      // 2. CREATE TRANSACTION - FIX CALLBACK_URL
+      // 2. CREATE TRANSACTION - FIXED
       if (url.pathname.includes("/create")) {
         const b: any = await request.json();
         const amount = parseInt(b.amount);
-        const merchant_ref = String(b.merchant_ref || "BY-" + Date.now()).trim();
+        
+        // FIX UTAMA: support camelCase & snake_case
+        const merchant_ref = String(b.merchant_ref || b.merchantRef || "BY-" + Date.now()).trim();
+        const customer_name = String(b.customer_name || b.customerName || "User").trim();
+        const customer_email = String(b.customer_email || b.customerEmail || "user@boosteryuk.com").trim();
+
         const merchant_code = String(env.TRIPAY_MERCHANT_CODE).trim();
         const privateKey = String(env.TRIPAY_PRIVATE_KEY).trim();
         const apiKey = String(env.TRIPAY_API_KEY).trim();
 
         let method = String(b.method || "QRIS").trim().toUpperCase();
         if (method === "QRIS2") method = "QRIS";
+
+        console.log("CREATE:", merchant_ref, "USER:", b.user_id, amount, method);
 
         const raw = merchant_code + merchant_ref + amount;
         const enc = new TextEncoder();
@@ -44,12 +51,11 @@ export default {
           method,
           merchant_ref,
           amount,
-          customer_name: b.customer_name || "User",
-          customer_email: b.customer_email || "user@boosteryuk.com",
-          customer_phone: "08123456789",
-          order_items: [{ sku: "DEP", name: "Deposit", price: amount, quantity: 1 }],
-          // INI YANG GUE FIX - HARUS api.boosteryuk.com
-          callback_url: "https://api.boosteryuk.com/api/tripay/callback",
+          customer_name,
+          customer_email,
+          customer_phone: b.customer_phone || b.customerPhone || "08123456789",
+          order_items: [{ sku: "DEP", name: "Deposit Saldo", price: amount, quantity: 1 }],
+          callback_url: "https://boosteryuk.com/api/callback.php",
           return_url: "https://boosteryuk.com/deposit",
           expired_time: Math.floor(Date.now() / 1000) + 86400,
           signature
@@ -64,46 +70,37 @@ export default {
         return new Response(txt, { status: r.status, headers: {...cors, "Content-Type": "application/json" } });
       }
 
-// 3. CALLBACK - FIXED
-if (url.pathname.includes("/callback")) {
-  if (request.method === "GET") {
-    return new Response(JSON.stringify({ success: true, msg: "callback active" }), { headers: {...cors, "Content-Type": "application/json" } });
-  }
-  
-  const bodyText = await request.text();
-  const tripaySignature = request.headers.get("x-callback-signature") || "";
+      // 3. CALLBACK - FORWARD KE PHP
+      if (url.pathname.includes("/callback")) {
+        if (request.method === "GET") {
+          return new Response(JSON.stringify({ success: true, msg: "callback active" }), { headers: {...cors, "Content-Type": "application/json" } });
+        }
+        
+        const bodyText = await request.text();
+        const tripaySignature = request.headers.get("x-callback-signature") || "";
 
-  // LOG BUAT DEBUG - BISA LIAT DI CLOUDFLARE WORKER LOG
-  console.log("TRIPAY CALLBACK RECEIVED:", bodyText);
-  console.log("SIGNATURE:", tripaySignature);
+        const forwardTask = async () => {
+          try {
+            const f = await fetch("https://boosteryuk.com/api/callback.php", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Callback-Signature": tripaySignature,
+                "X-Callback-Event": request.headers.get("x-callback-event") || "payment_status",
+              },
+              body: bodyText
+            });
+            console.log("Forward to callback.php:", f.status, await f.text());
+          } catch (e: any) { 
+            console.log("Forward Error:", e.message); 
+          }
+        };
 
-  const forwardTask = async () => {
-    try {
-      const f = await fetch("https://boosteryuk.com/api/callback.php", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          // INI YANG BENER - JANGAN DI GANTI NAMANYA
-          "X-Callback-Signature": tripaySignature,
-          "X-Callback-Event": request.headers.get("x-callback-event") || "payment_status",
-          "X-Callback-Secret": String(env.CALLBACK_SECRET || "BOOSTERYUK123"),
-          "User-Agent": "Tripay-Callback"
-        },
-        body: bodyText
-      });
-      const resText = await f.text();
-      console.log("Forward to callback.php:", f.status, resText);
-    } catch (e: any) { 
-      console.log("Forward Error:", e.message); 
-    }
-  };
+        if (ctx?.waitUntil) ctx.waitUntil(forwardTask());
+        else await forwardTask();
 
-  if (ctx?.waitUntil) ctx.waitUntil(forwardTask());
-  else await forwardTask();
-
-  // HARUS BALIKIN 200 SECEPATNYA KE TRIPAY
-  return new Response(JSON.stringify({ success: true }), { headers: {...cors, "Content-Type": "application/json" } });
-}
+        return new Response(JSON.stringify({ success: true }), { headers: {...cors, "Content-Type": "application/json" } });
+      }
 
       return new Response(JSON.stringify({ ok: true, message: "Worker Active" }), { headers: {...cors, "Content-Type": "application/json" } });
     } catch (e: any) {
