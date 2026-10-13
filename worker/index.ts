@@ -55,7 +55,7 @@ export default {
           customer_email,
           customer_phone: b.customer_phone || b.customerPhone || "08123456789",
           order_items: [{ sku: "DEP", name: "Deposit Saldo", price: amount, quantity: 1 }],
-          callback_url: "https://api.boosteryuk.com/api/callback.php",
+          callback_url: "https://api.boosteryuk.com/api/tripay/callback",
           return_url: "https://boosteryuk.com/deposit",
           expired_time: Math.floor(Date.now() / 1000) + 86400,
           signature
@@ -70,7 +70,7 @@ export default {
         return new Response(txt, { status: r.status, headers: {...cors, "Content-Type": "application/json" } });
       }
 
-      // 3. CALLBACK - FORWARD KE PHP
+      // 3. CALLBACK - FORWARD KE PHP YANG BENER
       if (url.pathname.includes("/callback")) {
         if (request.method === "GET") {
           return new Response(JSON.stringify({ success: true, msg: "callback active" }), { headers: {...cors, "Content-Type": "application/json" } });
@@ -81,16 +81,18 @@ export default {
 
         const forwardTask = async () => {
           try {
-            const f = await fetch("https://boosteryuk.com/api/callback.php", {
+            // FIX: forward ke api.boosteryuk.com yang proven work, BUKAN ke boosteryuk.com
+            const f = await fetch("https://api.boosteryuk.com/api/tripay/callback", {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
                 "X-Callback-Signature": tripaySignature,
+                "X-Callback-Secret": "BOOSTERYUK123",
                 "X-Callback-Event": request.headers.get("x-callback-event") || "payment_status",
               },
               body: bodyText
             });
-            console.log("Forward to callback.php:", f.status, await f.text());
+            console.log("Forward to api/tripay/callback:", f.status, await f.text());
           } catch (e: any) { 
             console.log("Forward Error:", e.message); 
           }
