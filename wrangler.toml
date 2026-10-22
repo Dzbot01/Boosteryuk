@@ -1,7 +1,31 @@
 name = "boosteryuk"
-compatibility_date = "2024-01-01"
+compatibility_date = "2026-10-01"
 main = "./worker/index.ts"
 
 [assets]
 directory = "./dist"
 not_found_handling = "single-page-application"
+# API calls must always reach the Worker, never fall back to index.html.
+run_worker_first = ["/api/*"]
+
+[observability]
+enabled = true
+
+# HostVDS (OpenStack) — non-secret values from openrc.sh
+[vars]
+OS_AUTH_URL = "https://os-api.hostvds.com/identity"
+OS_PROJECT_NAME = "hostvds-b8738e20-1b66-4144-84f6-1df6e3a362dc"
+OS_USERNAME = "hostvds-b8738e20-1b66-4144-84f6-1df6e3a362dc"
+OS_USER_DOMAIN_NAME = "Default"
+OS_PROJECT_DOMAIN_ID = "default"
+OS_REGION_NAME = "eu-west2"
+OS_INTERFACE = "public"
+VPS_CATALOG_TTL = "300"
+# Optional pricing override (EUR/month). Exact prices per flavor name win over the formula:
+# VPS_PRICING = '{"flavors":{"vds-1-1":1.49},"perVcpu":0.5,"perGbRam":1.0,"perGbDisk":0.02,"minimum":1.49,"markup":1}'
+
+# Secrets — set with `npx wrangler secret put <NAME>`, never commit them:
+#   OS_PASSWORD           HostVDS OpenStack password
+#   VPS_API_KEY           guards /api/vps/servers* and raw endpoints
+#   TRIPAY_API_KEY, TRIPAY_PRIVATE_KEY, TRIPAY_MERCHANT_CODE, CALLBACK_SECRET  (existing)
+# Local dev: put them in .dev.vars (gitignored)
