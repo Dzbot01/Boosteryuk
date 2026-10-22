@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, ChevronDown, Layers, Server, Sparkles, Tag } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ChevronDown, Layers, RefreshCw, Server, Sparkles, Tag } from 'lucide-react';
 import { SERVICE_SLIDES } from '../constants';
 import DragScroller from '../components/DragScroller';
 import OrderDetailSheet, { type OrderDetail } from '../components/OrderDetailSheet';
@@ -11,15 +11,8 @@ import {
   SectionHeader,
   VersionChip,
 } from '../components/ServerCards';
-import {
-  IMAGES,
-  IP_OPTIONS,
-  NETWORK_PLANS,
-  PLANS,
-  PLAN_FAMILIES,
-  REGIONS,
-  type PlanFamily,
-} from '../data/serverData';
+import { IP_OPTIONS, NETWORK_PLANS, PLAN_FAMILIES, type PlanFamily } from '../data/serverData';
+import { useVpsCatalog, type VpsCatalogState } from '../services/vpsApi';
 
 const COLOR = {
   primary: '#48C6E5',
@@ -61,6 +54,60 @@ function FormSection({
       <SectionHeader step={step} title={title} hint={hint} />
       {children}
     </section>
+  );
+}
+
+/** Kartu placeholder saat katalog HostVDS sedang dimuat. */
+function SkeletonCards({ count, width }: { count: number; width: number }) {
+  return (
+    <>
+      {Array.from({ length: count }, (_, i) => (
+        <div
+          key={i}
+          className="aspect-square shrink-0 animate-pulse rounded-2xl border border-slate-200 bg-slate-100"
+          style={{ width }}
+        />
+      ))}
+    </>
+  );
+}
+
+/** Status sumber data: live dari HostVDS, memuat, atau fallback ke katalog contoh. */
+function CatalogStatus({ catalog }: { catalog: VpsCatalogState }) {
+  if (catalog.status === 'loading') {
+    return (
+      <p className="flex items-center gap-2 rounded-xl bg-slate-50 px-3.5 py-2.5 text-[11.5px] font-medium text-slate-500">
+        <RefreshCw className="h-3.5 w-3.5 animate-spin text-cyan-500" strokeWidth={2.4} />
+        Memuat paket, image &amp; region dari HostVDS…
+      </p>
+    );
+  }
+  if (catalog.status === 'fallback') {
+    return (
+      <div className="flex items-start justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5">
+        <p className="flex items-start gap-2 text-[11.5px] font-medium text-amber-700">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" strokeWidth={2.4} />
+          <span>
+            Data live HostVDS belum tersedia — menampilkan katalog contoh.
+            {catalog.error ? <span className="block text-[10.5px] text-amber-600/80">{catalog.error}</span> : null}
+          </span>
+        </p>
+        <button
+          type="button"
+          onClick={catalog.reload}
+          className="shrink-0 rounded-lg bg-white px-2.5 py-1 text-[11px] font-bold text-amber-700 ring-1 ring-amber-200 transition-all hover:bg-amber-100 active:scale-95"
+        >
+          Coba lagi
+        </button>
+      </div>
+    );
+  }
+  return (
+    <p className="flex items-center gap-2 text-[11px] font-medium text-slate-400">
+      <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse-dot" />
+      Live dari HostVDS
+      {catalog.generatedAt ? ` · diperbarui ${new Date(catalog.generatedAt).toLocaleTimeString('id-ID')}` : ''}
+    </p>
   );
 }
 
@@ -169,6 +216,14 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [next]);
 
+  /* ----------------------- katalog HostVDS ----------------------- */
+  const catalog = useVpsCatalog();
+  const loading = catalog.status === 'loading';
+  const families = useMemo(
+    () => PLAN_FAMILIES.filter((item) => catalog.plans.some((plan) => plan.family === item)),
+    [catalog.plans],
+  );
+
   /* ------------------------- order state ------------------------- */
   const [family, setFamily] = useState<PlanFamily>('Burstable');
   const [planId, setPlanId] = useState<string | null>(null);
@@ -176,19 +231,25 @@ export default function App() {
   const [networkId, setNetworkId] = useState<string>(NETWORK_PLANS[0].id);
   const [imageTab, setImageTab] = useState<'os' | 'app'>('os');
   const [imageId, setImageId] = useState<string | null>(null);
-  const [imageVersion, setImageVersion] = useState<string>(IMAGES[0].versions[0]);
+  const [imageVersion, setImageVersion] = useState<string>('');
   const [serverName, setServerName] = useState('');
   const [ipId, setIpId] = useState<string>(IP_OPTIONS[0].id);
   const [quantity, setQuantity] = useState(1);
   const [sheetOpen, setSheetOpen] = useState(false);
 
-  const familyPlans = useMemo(() => PLANS.filter((plan) => plan.family === family), [family]);
-  const plan = useMemo(() => PLANS.find((item) => item.id === planId) || null, [planId]);
-  const region = useMemo(() => REGIONS.find((item) => item.id === regionId) || null, [regionId]);
+  // Jika katalog live tidak punya paket di family terpilih, pindah ke family pertama yang ada.
+  useEffect(() => {
+    if (families.length && !families.includes(family)) setFamily(families[0]);
+  }, [families, family]);
+
+  const familyPlans = useMemo(() => catalog.plans.filter((plan) => plan.family === family), [catalog.plans, family]);
+  const plan = useMemo(() => catalog.plans.find((item) => item.id === planId) || null, [catalog.plans, planId]);
+  const region = useMemo(() => catalog.regions.find((item) => item.id === regionId) || null, [catalog.regions, regionId]);
   const network = useMemo(() => NETWORK_PLANS.find((item) => item.id === networkId) || NETWORK_PLANS[0], [networkId]);
   const ipOption = useMemo(() => IP_OPTIONS.find((item) => item.id === ipId) || IP_OPTIONS[0], [ipId]);
-  const images = useMemo(() => IMAGES.filter((image) => image.kind === imageTab), [imageTab]);
-  const image = useMemo(() => IMAGES.find((item) => item.id === imageId) || null, [imageId]);
+  const images = useMemo(() => catalog.images.filter((image) => image.kind === imageTab), [catalog.images, imageTab]);
+  const image = useMemo(() => catalog.images.find((item) => item.id === imageId) || null, [catalog.images, imageId]);
+  const hasEstimatedPrice = familyPlans.some((item) => item.priceSource === 'formula');
 
   const detail: OrderDetail | null = plan
     ? { plan, region, network, image, imageVersion, ip: ipOption, serverName }
@@ -200,7 +261,7 @@ export default function App() {
   };
 
   const selectImage = (id: string) => {
-    const target = IMAGES.find((item) => item.id === id);
+    const target = catalog.images.find((item) => item.id === id);
     setImageId(id);
     if (target) setImageVersion(target.versions[0]);
   };
@@ -212,7 +273,7 @@ export default function App() {
     setNetworkId(NETWORK_PLANS[0].id);
     setImageTab('os');
     setImageId(null);
-    setImageVersion(IMAGES[0].versions[0]);
+    setImageVersion('');
     setServerName('');
     setIpId(IP_OPTIONS[0].id);
     setQuantity(1);
@@ -327,6 +388,10 @@ export default function App() {
 
             <div className="my-4 h-px w-full" style={{ background: COLOR.border }} />
 
+            <div className="mb-5">
+              <CatalogStatus catalog={catalog} />
+            </div>
+
             <div className="space-y-7">
               {/* Step 01 — MODAL PILIHAN FAMILY PLAN
                   Dropdown untuk memilih keluarga server: Burstable /
@@ -335,7 +400,8 @@ export default function App() {
                 <CustomSelect
                   id="new-server-plan"
                   value={family}
-                  options={PLAN_FAMILIES.map((item) => ({ value: item, label: item }))}
+                  disabled={loading}
+                  options={(families.length ? families : PLAN_FAMILIES).map((item) => ({ value: item, label: item }))}
                   onChange={(value) => {
                     setFamily(value as PlanFamily);
                     setPlanId(null);
@@ -349,9 +415,14 @@ export default function App() {
               <FormSection
                 step="02"
                 title="Pilih Paket Server"
-                hint={`${familyPlans.length} paket tersedia untuk plan ${family}`}
+                hint={
+                  loading
+                    ? 'Memuat paket dari HostVDS…'
+                    : `${familyPlans.length} paket tersedia untuk plan ${family}${hasEstimatedPrice ? ' · harga estimasi' : ''}`
+                }
               >
                 <DragScroller hint="Geser / drag ke kiri-kanan untuk melihat paket lain">
+                  {loading ? <SkeletonCards count={4} width={244} /> : null}
                   {familyPlans.map((item) => (
                     <PlanCard
                       key={item.id}
@@ -370,10 +441,15 @@ export default function App() {
               <FormSection
                 step="03"
                 title="Region"
-                hint="Ping diukur dari lokasi Anda (Looking Glass)"
+                hint={
+                  catalog.status === 'live'
+                    ? `${catalog.regions.length} region tersedia di HostVDS`
+                    : 'Ping diukur dari lokasi Anda (Looking Glass)'
+                }
               >
                 <DragScroller hint="Geser / drag untuk melihat region lain">
-                  {REGIONS.map((item) => (
+                  {loading ? <SkeletonCards count={3} width={212} /> : null}
+                  {catalog.regions.map((item) => (
                     <RegionCard
                       key={item.id}
                       region={item}
@@ -441,6 +517,10 @@ export default function App() {
 
                 {/* Baris kartu ikon image di dalam slider drag */}
                 <DragScroller hint="Geser untuk melihat semua image">
+                  {loading ? <SkeletonCards count={6} width={132} /> : null}
+                  {!loading && !images.length ? (
+                    <p className="py-6 text-[12px] font-medium text-slate-400">Belum ada image untuk kategori ini.</p>
+                  ) : null}
                   {images.map((item) => (
                     <ImageTile
                       key={item.id}

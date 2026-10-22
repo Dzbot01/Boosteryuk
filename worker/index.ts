@@ -1,3 +1,5 @@
+import { handleVps, isVpsRequest } from "./hostvds/routes";
+
 export default {
   async fetch(request: Request, env: any, ctx: any) {
     const cors = {
@@ -5,11 +7,16 @@ export default {
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type, X-Callback-Signature, X-Callback-Secret"
     };
+    const url = new URL(request.url);
+
+    // 0. HOSTVDS VPS API (/api/vps/*) — handled before the path.includes() checks below
+    if (isVpsRequest(url)) {
+      return handleVps(request, env, ctx, cors);
+    }
+
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: cors });
     }
-
-    const url = new URL(request.url);
 
     try {
       // 1. GET PAYMENT CHANNELS

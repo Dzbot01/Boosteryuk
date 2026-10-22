@@ -18,6 +18,10 @@ export interface PlanSpec {
   bandwidth: string;
   traffic: string;
   monthly: number;
+  /** OpenStack flavor id when the plan comes from the HostVDS API. */
+  flavorId?: string;
+  /** 'formula' = estimated price from the worker's pricing formula. */
+  priceSource?: 'flavor' | 'formula';
 }
 
 export const PLANS: PlanSpec[] = [
@@ -54,7 +58,8 @@ export interface RegionSpec {
   country: string;
   flag: string; // flagcdn code
   city: string;
-  ping: number;
+  /** Latency in ms; undefined when unknown (e.g. region from the HostVDS API). */
+  ping?: number;
   code: string;
 }
 
@@ -113,6 +118,8 @@ export interface ImageSpec {
   color: string;
   versions: string[];
   size?: string;
+  /** version label -> Glance image id, when the image comes from the HostVDS API. */
+  imageIds?: Record<string, string>;
 }
 
 export const IMAGES: ImageSpec[] = [

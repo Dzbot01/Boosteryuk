@@ -111,7 +111,7 @@ export function RegionCard({
   selected: boolean;
   onSelect: () => void;
 }) {
-  const level = PING_STYLE[pingLevel(region.ping)];
+  const level = region.ping === undefined ? null : PING_STYLE[pingLevel(region.ping)];
   const [flagFailed, setFlagFailed] = useState(false);
 
   return (
@@ -148,13 +148,23 @@ export function RegionCard({
         {region.city}
       </p>
 
-      <div className={`mt-auto flex items-center justify-between rounded-lg px-2.5 py-1.5 ring-1 ${level.bg} ${level.ring}`}>
-        <span className="flex items-center gap-1.5">
-          <span className={`h-2 w-2 rounded-full ${level.dot} animate-pulse-dot`} />
-          <span className={`text-[11.5px] font-extrabold ${level.text}`}>{region.ping}ms</span>
-        </span>
-        <span className="text-[9.5px] font-bold uppercase tracking-wide text-slate-400">{level.label}</span>
-      </div>
+      {level ? (
+        <div className={`mt-auto flex items-center justify-between rounded-lg px-2.5 py-1.5 ring-1 ${level.bg} ${level.ring}`}>
+          <span className="flex items-center gap-1.5">
+            <span className={`h-2 w-2 rounded-full ${level.dot} animate-pulse-dot`} />
+            <span className={`text-[11.5px] font-extrabold ${level.text}`}>{region.ping}ms</span>
+          </span>
+          <span className="text-[9.5px] font-bold uppercase tracking-wide text-slate-400">{level.label}</span>
+        </div>
+      ) : (
+        <div className="mt-auto flex items-center justify-between rounded-lg bg-emerald-50 px-2.5 py-1.5 ring-1 ring-emerald-200">
+          <span className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse-dot" />
+            <span className="text-[11.5px] font-extrabold text-emerald-600">Online</span>
+          </span>
+          <span className="text-[9.5px] font-bold uppercase tracking-wide text-slate-400">HostVDS</span>
+        </div>
+      )}
       <p className="mt-1.5 text-[9.5px] font-medium text-slate-400">Looking Glass · {region.code}</p>
     </button>
   );
