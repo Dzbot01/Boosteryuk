@@ -541,7 +541,7 @@ function SummaryCard({
       <span className={`flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br ${toneCls} text-white shadow-md`}>
         <Icon className="h-5 w-5" strokeWidth={2.2} />
       </span>
-      <p className="mt-3 text-[10.5px] font-bold uppercase tracking-wider text-slate-400">{label}</p>
+      <p className="mt-3 text-[10.5px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-400">{label}</p>
       <p className="mt-1 font-display text-[22px] font-extrabold leading-none text-slate-900 dark:text-white">
         {value}
       </p>

@@ -90,7 +90,7 @@ export default function DragScroller({
       </div>
 
       <div className="mt-2 flex items-center justify-between gap-3 px-0.5">
-        <span className="inline-flex items-center gap-1.5 text-[10.5px] font-medium text-slate-400">
+        <span className="inline-flex items-center gap-1.5 text-[10.5px] font-medium text-slate-400 dark:text-slate-400">
           <GripHorizontal className="h-3.5 w-3.5" strokeWidth={2.4} />
           {hint ?? 'Geser / drag untuk melihat pilihan lain'}
         </span>

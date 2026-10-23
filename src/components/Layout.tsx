@@ -1,35 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import Header from './Header';
 import SideMenu from './SideMenu';
 import BottomNavbar from './BottomNavbar';
-import PushBanner from './PushBanner';
-import InfoModal from './InfoModal';
+import AuthLoadingModal from './AuthLoadingModal';
 import Calculator from './Calculator';
-
-const BANNER_DELAY = 4000;
 
 export default function Layout() {
   const [menuOpen, setMenuOpen] = useState(false);
-  /* Identical reveal pattern to the music tooltip: hidden on first paint,
-     fired once after a fixed delay, permanently gone once dismissed. */
-  const [showPushBanner, setShowPushBanner] = useState(false);
-  const bannerDismissed = useRef(false);
+  // Banner push notifikasi (PushBanner) dihapus dari layout atas permintaan.
   const { pathname } = useLocation();
-
-  // Reveal the banner exactly once, 4s after the site loads — never on first paint.
-  useEffect(() => {
-    if (bannerDismissed.current) return;
-    const timer = window.setTimeout(() => {
-      if (!bannerDismissed.current) setShowPushBanner(true);
-    }, BANNER_DELAY);
-    return () => window.clearTimeout(timer);
-  }, []);
-
-  const dismissBanner = useCallback(() => {
-    bannerDismissed.current = true;
-    setShowPushBanner(false);
-  }, []);
 
   // Reset scroll position when the route changes (except for in-page anchors).
   useEffect(() => {
@@ -49,7 +29,6 @@ export default function Layout() {
       <Header onMenuClick={() => setMenuOpen(true)} />
       {/* spacer for fixed header */}
       <div className="h-[60px]" />
-      {showPushBanner && <PushBanner onClose={dismissBanner} />}
 
       <SideMenu
         isOpen={menuOpen}
@@ -60,8 +39,9 @@ export default function Layout() {
 
       <BottomNavbar />
 
-      {/* Floating info modal — reappears on each route change / refresh */}
-      <InfoModal />
+      {/* InfoModal (pengumuman yang muncul tiap buka/refresh halaman) diganti modal loading
+          yang hanya tampil sekali selama data auth user dimuat pertama kali. */}
+      <AuthLoadingModal />
 
       {/* Floating calculator */}
       <Calculator />

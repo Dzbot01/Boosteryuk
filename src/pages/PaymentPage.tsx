@@ -204,7 +204,8 @@ export default function PaymentPage() {
   };
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-10 sm:px-6">
+    // page-align-left: di desktop kolom ini rata kiri sejajar header (lihat index.css)
+    <div className="page-align-left mx-auto max-w-2xl px-4 py-10 sm:px-6">
       <div className="flex items-center justify-between gap-3">
         <button
           onClick={() => navigate('/profil')}
@@ -301,7 +302,7 @@ export default function PaymentPage() {
             <span className="absolute -bottom-1.5 -left-1.5 h-7 w-7 rounded-bl-xl border-b-[3px] border-l-[3px] border-cyan-500" />
             <span className="absolute -bottom-1.5 -right-1.5 h-7 w-7 rounded-br-xl border-b-[3px] border-r-[3px] border-cyan-500" />
 
-            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white p-2 dark:border-slate-700">
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white p-2 dark:border-slate-700 dark:bg-slate-900">
               <img
                 src={QRIS_IMAGE}
                 alt="QRIS Boosteryuk"
@@ -361,7 +362,7 @@ export default function PaymentPage() {
                   </span>
                 </span>
                 <ChevronDown
-                  className={`h-4 w-4 shrink-0 text-slate-400 transition-transform duration-300 ${
+                  className={`h-4 w-4 shrink-0 text-slate-400 transition-transform duration-300 dark:text-slate-400 ${
                     open ? 'rotate-180 text-cyan-600 dark:text-cyan-400' : ''
                   }`}
                   strokeWidth={2.4}

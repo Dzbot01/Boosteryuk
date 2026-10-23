@@ -66,7 +66,8 @@ export default function HubungiPage() {
   ];
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-10 sm:px-6">
+    // page-align-left: di desktop kolom ini rata kiri sejajar header (lihat index.css)
+    <div className="page-align-left mx-auto max-w-2xl px-4 py-10 sm:px-6">
       <Reveal>
         <button
           onClick={() => navigate('/')}

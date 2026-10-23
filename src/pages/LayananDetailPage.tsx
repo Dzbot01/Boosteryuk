@@ -71,7 +71,8 @@ export default function LayananDetailPage() {
   if (!category) return <Navigate to="/layanan" replace />;
 
   return (
-    <div className="mx-auto max-w-4xl px-4 pb-32 pt-8 sm:px-6">
+    // page-align-left: di desktop kolom ini rata kiri sejajar header (lihat index.css)
+    <div className="page-align-left mx-auto max-w-4xl px-4 pb-32 pt-8 sm:px-6">
       <Reveal>
         <button
           onClick={() => navigate('/layanan')}
@@ -181,7 +182,7 @@ export default function LayananDetailPage() {
           {query && (
             <button
               onClick={() => setQuery('')}
-              className="mt-5 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-[13px] font-bold text-slate-700 transition-all hover:bg-slate-50 active:scale-95 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+              className="mt-5 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-[13px] font-bold text-slate-700 transition-all hover:bg-slate-50 active:scale-95 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
             >
               Reset pencarian
             </button>

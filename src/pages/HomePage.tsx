@@ -170,7 +170,7 @@ export default function HomePage() {
                     setAuthMode('register');
                     setAuthOpen(true);
                   }}
-                  className="inline-flex h-9 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-4 text-[12px] font-bold text-slate-700 transition-all hover:border-cyan-300 hover:bg-cyan-50 hover:text-cyan-700 active:scale-95 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                  className="inline-flex h-9 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-4 text-[12px] font-bold text-slate-700 transition-all hover:border-cyan-300 hover:bg-cyan-50 hover:text-cyan-700 active:scale-95 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-cyan-950/60"
                 >
                   <Shield className="h-3.5 w-3.5" strokeWidth={2.4} />
                   Daftar

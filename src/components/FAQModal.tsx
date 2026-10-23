@@ -83,7 +83,7 @@ export default function FAQModal({ isOpen, onClose }: FAQModalProps) {
                     <button onClick={() => setExpanded(open ? null : i)} className="flex w-full items-center gap-3 px-4 py-3 text-left">
                       <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[11px] font-bold transition-colors ${open ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400'}`}>{i + 1}</span>
                       <span className="flex-1 text-[13.5px] font-semibold leading-snug text-slate-800 dark:text-slate-200">{faq.question}</span>
-                      <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform duration-300 ${open ? 'rotate-180 text-blue-600 dark:text-blue-400' : 'dark:text-slate-500'}`} />
+                      <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform duration-300 dark:text-slate-400 ${open ? 'rotate-180 text-blue-600 dark:text-blue-400' : 'dark:text-slate-500'}`} />
                     </button>
                     <div className={`grid transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${open ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}>
                       <div className="overflow-hidden">

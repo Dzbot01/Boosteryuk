@@ -147,7 +147,7 @@ export default function Header({ onMenuClick }: HeaderProps) {
                       <Wallet className="h-4 w-4" strokeWidth={2.2} />
                     </span>
                     <div>
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-400">
                         Saldo
                       </p>
                       <p className="font-display text-[15px] font-extrabold leading-none text-slate-900 dark:text-white">
@@ -165,7 +165,7 @@ export default function Header({ onMenuClick }: HeaderProps) {
                       }}
                       className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-[12.5px] font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"
                     >
-                      <Settings className="h-4 w-4 text-slate-400" strokeWidth={2.1} />
+                      <Settings className="h-4 w-4 text-slate-400 dark:text-slate-400" strokeWidth={2.1} />
                       Pengaturan akun
                       <ChevronRight className="ml-auto h-3.5 w-3.5 text-slate-300" />
                     </button>
@@ -193,10 +193,7 @@ export default function Header({ onMenuClick }: HeaderProps) {
             className="group relative flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 shadow-sm transition-all duration-200 hover:border-blue-300 hover:text-blue-700 hover:shadow-md active:scale-95 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-blue-600 dark:hover:text-blue-400"
           >
             <Menu className="h-5 w-5" strokeWidth={2.2} />
-            <span className="absolute -right-0.5 -top-0.5 flex h-2.5 w-2.5">
-              <span className="absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-70 pulse-ring text-blue-400" />
-              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-blue-600" />
-            </span>
+            {/* Titik indikator (pulse) di pojok tombol menu sengaja dihapus. */}
           </button>
         </div>
       </div>

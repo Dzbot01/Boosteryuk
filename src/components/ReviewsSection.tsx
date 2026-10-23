@@ -215,7 +215,7 @@ function WriteReviewModal({
         <div className="mt-5 grid grid-cols-2 gap-2.5">
           <button
             onClick={onClose}
-            className="h-11 rounded-xl border border-slate-200 bg-white text-[13px] font-bold text-slate-600 transition-all hover:bg-slate-50 active:scale-[0.98] dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+            className="h-11 rounded-xl border border-slate-200 bg-white text-[13px] font-bold text-slate-600 transition-all hover:bg-slate-50 active:scale-[0.98] dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-800"
           >
             Batal
           </button>
@@ -269,8 +269,9 @@ export default function ReviewsSection() {
             <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-blue-600 dark:text-blue-400">
               Kenapa Boosteryuk
             </span>
+            {/* Judul section ulasan diganti dari "Kata mereka yang puas." */}
             <h2 className="mt-2 font-display text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white sm:text-[38px]">
-              Kata mereka yang puas.
+              Apa kata mereka.
             </h2>
           </div>
           <p className="max-w-sm text-[14px] leading-relaxed text-slate-600 dark:text-slate-400">

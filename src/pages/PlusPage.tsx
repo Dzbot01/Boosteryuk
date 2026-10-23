@@ -10,7 +10,8 @@ export default function PlusPage() {
   const { user } = useAuth();
 
   return (
-    <div className="mx-auto max-w-3xl px-4 pb-32 pt-8 sm:px-6">
+    // page-align-left: di desktop kolom ini rata kiri sejajar header (lihat index.css)
+    <div className="page-align-left mx-auto max-w-3xl px-4 pb-32 pt-8 sm:px-6">
       <Reveal>
         <button
           onClick={() => navigate('/')}

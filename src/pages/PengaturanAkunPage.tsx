@@ -115,7 +115,8 @@ export default function PengaturanAkunPage() {
   };
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-10 sm:px-6">
+    // page-align-left: di desktop kolom ini rata kiri sejajar header (lihat index.css)
+    <div className="page-align-left mx-auto max-w-2xl px-4 py-10 sm:px-6">
       <Reveal>
         <button
           onClick={() => navigate(-1)}
@@ -247,7 +248,7 @@ export default function PengaturanAkunPage() {
             {!emailVerified && showOtp && (
               <div className="animate-fade-in space-y-3 rounded-xl border border-cyan-200 bg-cyan-50/40 p-4 dark:border-cyan-800/40 dark:bg-cyan-900/15">
                 <div className="relative">
-                  <KeySquare className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <KeySquare className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-400" />
                   <input
                     value={otp}
                     onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
@@ -297,7 +298,7 @@ export default function PengaturanAkunPage() {
                 <button
                   type="button"
                   onClick={() => setShowPw((v) =>!v)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:text-slate-400"
                 >
                   {showPw? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
@@ -371,7 +372,7 @@ function Field({
         {label}
       </span>
       <span className="relative block">
-        <Icon className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" strokeWidth={2.1} />
+        <Icon className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-400" strokeWidth={2.1} />
         {children}
       </span>
     </label>

@@ -10,7 +10,7 @@ export default function PrivacyPage() {
       intro="Kebijakan ini menjelaskan data yang digunakan Boosteryuk untuk menyediakan layanan, memproses pesanan, dan membantu pelanggan."
       icon={ShieldCheck}
     >
-      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-400">
         Terakhir diperbarui: 2026
       </p>
       <TextSection title="Informasi yang kami gunakan">

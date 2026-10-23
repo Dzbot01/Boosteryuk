@@ -138,7 +138,7 @@ export default function AdminWebsitePage() {
                   resetLogo();
                   flash();
                 }}
-                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-[12.5px] font-bold text-slate-600 transition-all hover:bg-slate-50 active:scale-95 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-[12.5px] font-bold text-slate-600 transition-all hover:bg-slate-50 active:scale-95 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-800"
               >
                 <RotateCcw className="h-3.5 w-3.5" strokeWidth={2.4} />
                 Default
@@ -166,7 +166,7 @@ export default function AdminWebsitePage() {
         <Card title="Nama Brand & Footer" icon={Type}>
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="block">
-              <span className="mb-1.5 block text-[10.5px] font-bold uppercase tracking-wider text-slate-400">
+              <span className="mb-1.5 block text-[10.5px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-400">
                 Nama brand (warna)
               </span>
               <input
@@ -177,7 +177,7 @@ export default function AdminWebsitePage() {
               />
             </label>
             <label className="block">
-              <span className="mb-1.5 block text-[10.5px] font-bold uppercase tracking-wider text-slate-400">
+              <span className="mb-1.5 block text-[10.5px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-400">
                 Suffix (hitam)
               </span>
               <input
@@ -189,7 +189,7 @@ export default function AdminWebsitePage() {
             </label>
           </div>
           <label className="mt-4 block">
-            <span className="mb-1.5 flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-wider text-slate-400">
+            <span className="mb-1.5 flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-400">
               <AlignLeft className="h-3 w-3" />
               Teks Footer
             </span>
@@ -201,12 +201,12 @@ export default function AdminWebsitePage() {
             />
           </label>
           <div className="mt-3 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-800/50">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Preview</p>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-400">Preview</p>
             <p className="mt-1 font-display text-[18px] font-extrabold">
               <span className="text-cyan-600">{brandName || 'Booster'}</span>
               <span className="text-slate-900 dark:text-white">{brandSuffix || 'yuk'}</span>
             </p>
-            <p className="mt-1 text-[12px] text-slate-500">{footerText}</p>
+            <p className="mt-1 text-[12px] text-slate-500 dark:text-slate-400">{footerText}</p>
           </div>
           <button
             onClick={saveBrand}
@@ -239,7 +239,7 @@ export default function AdminWebsitePage() {
                 setMusicName('');
                 flash();
               }}
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-[12.5px] font-bold text-slate-600 transition-all hover:bg-slate-50 active:scale-95 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-[12.5px] font-bold text-slate-600 transition-all hover:bg-slate-50 active:scale-95 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <RotateCcw className="h-3.5 w-3.5" strokeWidth={2.4} />
               Gunakan Default
@@ -264,7 +264,7 @@ export default function AdminWebsitePage() {
               Aktif: {musicName}
             </p>
           )}
-          <p className="mt-2 text-[11px] text-slate-400">
+          <p className="mt-2 text-[11px] text-slate-400 dark:text-slate-400">
             Sumber saat ini:{' '}
             <span className="font-mono">
               {settings.musicUrl.startsWith('blob:') ? 'File custom (session)' : settings.musicUrl}
@@ -283,7 +283,7 @@ export default function AdminWebsitePage() {
             </p>
             <button
               onClick={() => setShowPreview(true)}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-cyan-200 bg-cyan-50 px-3.5 py-2 text-[12px] font-bold text-cyan-700 transition-all hover:bg-cyan-100 active:scale-95 dark:border-cyan-800/40 dark:bg-cyan-900/25 dark:text-cyan-400"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-cyan-200 bg-cyan-50 px-3.5 py-2 text-[12px] font-bold text-cyan-700 transition-all hover:bg-cyan-100 active:scale-95 dark:border-cyan-800/40 dark:bg-cyan-900/25 dark:text-cyan-400 dark:hover:bg-cyan-900/40"
             >
               <Eye className="h-3.5 w-3.5" strokeWidth={2.3} />
               Preview Modal
@@ -327,7 +327,7 @@ export default function AdminWebsitePage() {
                 {/* Gambar (opsional) */}
                 <div className="mt-2 flex items-center gap-2">
                   {item.image && (
-                    <span className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-slate-200">
+                    <span className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700">
                       <img src={item.image} alt="" className="h-full w-full object-cover" />
                       <button
                         onClick={() => updateInfo(item.id, { image: undefined })}
@@ -343,7 +343,7 @@ export default function AdminWebsitePage() {
                       setUploadTargetId(item.id);
                       infoImageInput.current?.click();
                     }}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[11.5px] font-bold text-slate-600 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[11.5px] font-bold text-slate-600 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-800"
                   >
                     <Upload className="h-3.5 w-3.5" strokeWidth={2.2} />
                     {item.image ? 'Ganti Gambar' : 'Tambah Gambar'}
@@ -364,7 +364,7 @@ export default function AdminWebsitePage() {
           <div className="mt-4 flex flex-wrap gap-2">
             <button
               onClick={addInfo}
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-[12.5px] font-bold text-slate-700 transition-all hover:bg-slate-50 active:scale-95 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-[12.5px] font-bold text-slate-700 transition-all hover:bg-slate-50 active:scale-95 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
             >
               <Plus className="h-3.5 w-3.5" strokeWidth={2.6} />
               Tambah Info
@@ -407,7 +407,7 @@ export default function AdminWebsitePage() {
                 <p className="font-display text-[16px] font-extrabold tracking-tight text-slate-900 dark:text-white">
                   Informasi &amp; Pengumuman
                 </p>
-                <p className="text-[11px] text-slate-400">{infoItems.length} pembaruan</p>
+                <p className="text-[11px] text-slate-400 dark:text-slate-400">{infoItems.length} pembaruan</p>
               </div>
               <button
                 onClick={() => setShowPreview(false)}

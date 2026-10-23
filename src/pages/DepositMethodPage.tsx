@@ -241,15 +241,16 @@ export default function DepositMethodPage() {
   if (!method || (!channel && channels.length > 0)) return <Navigate to="/deposit" replace />;
 
   const inputClass =
-    'h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-[13px] font-medium text-slate-800 outline-none transition-colors focus:border-cyan-400 focus:ring-4 focus:ring-cyan-500/10';
+    'h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-[13px] font-medium text-slate-800 outline-none transition-colors focus:border-cyan-400 focus:ring-4 focus:ring-cyan-500/10 dark:text-slate-100 dark:bg-slate-900 dark:border-slate-700';
 
   return (
-    <div className="mx-auto max-w-2xl px-4 pb-32 pt-8 sm:px-6">
+    // page-align-left: di desktop kolom ini rata kiri sejajar header (lihat index.css)
+    <div className="page-align-left mx-auto max-w-2xl px-4 pb-32 pt-8 sm:px-6">
       {/* Tombol kembali */}
       <Reveal>
         <button
           onClick={() => navigate('/deposit')}
-          className="mb-6 inline-flex items-center gap-2 rounded-xl px-3 py-2 text-[13.5px] font-semibold text-slate-500 transition-all hover:bg-slate-100 hover:text-slate-900 active:scale-95"
+          className="mb-6 inline-flex items-center gap-2 rounded-xl px-3 py-2 text-[13.5px] font-semibold text-slate-500 transition-all hover:bg-slate-100 hover:text-slate-900 active:scale-95 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
         >
           <ArrowLeft className="h-4 w-4" strokeWidth={2.4} />
           Kembali
@@ -258,16 +259,16 @@ export default function DepositMethodPage() {
 
       {/* Judul */}
       <Reveal delay={30}>
-        <h1 className="text-[28px] font-extrabold tracking-tight text-slate-900 sm:text-[32px]">
+        <h1 className="text-[28px] font-extrabold tracking-tight text-slate-900 sm:text-[32px] dark:text-white">
           Deposit {channel?.name ?? method}
         </h1>
-        <p className="mt-1.5 text-[13.5px] text-slate-500">
+        <p className="mt-1.5 text-[13.5px] text-slate-500 dark:text-slate-400">
           {channel ? `${channel.group} · ${channel.name}` : 'Memuat data channel…'}
         </p>
       </Reveal>
 
       <Reveal delay={60}>
-        <div className="mt-6 inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-cyan-50 px-3.5 py-1.5 text-[11.5px] font-bold text-cyan-700">
+        <div className="mt-6 inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-cyan-50 px-3.5 py-1.5 text-[11.5px] font-bold text-cyan-700 dark:bg-cyan-950/40 dark:border-cyan-800/60">
           <Sparkles className="h-3.5 w-3.5" strokeWidth={2.4} />
           {bonusRate > 0
             ? `Bonus deposit aktif — ${Math.round(bonusRate * 100)}% tiap top-up`
@@ -279,10 +280,10 @@ export default function DepositMethodPage() {
           MODAL CARD UTAMA — form nominal deposit
          ====================================================== */}
       <Reveal delay={90}>
-        <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_16px_44px_-28px_rgba(15,23,42,.35)] sm:p-5">
+        <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_16px_44px_-28px_rgba(15,23,42,.35)] sm:p-5 dark:bg-slate-900 dark:border-slate-700">
           {/* Header kartu */}
           <div className="flex items-center gap-3">
-            <span className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl bg-white p-1.5 ring-1 ring-slate-100">
+            <span className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl bg-white p-1.5 ring-1 ring-slate-100 dark:bg-slate-900 dark:ring-slate-800">
               {channel?.icon_url ? (
                 <img src={channel.icon_url} alt={channel.code} className="h-full w-full object-contain" />
               ) : (
@@ -290,9 +291,9 @@ export default function DepositMethodPage() {
               )}
             </span>
             <div className="min-w-0">
-              <p className="text-[15px] font-extrabold text-slate-900">{channel?.name ?? method}</p>
-              <p className="text-[11.5px] text-slate-500">
-                Channel <span className="font-mono font-bold text-slate-700">{method}</span> · Min{' '}
+              <p className="text-[15px] font-extrabold text-slate-900 dark:text-white">{channel?.name ?? method}</p>
+              <p className="text-[11.5px] text-slate-500 dark:text-slate-400">
+                Channel <span className="font-mono font-bold text-slate-700 dark:text-slate-200">{method}</span> · Min{' '}
                 {formatRupiah(minAmount)} · Maks {formatRupiah(maxAmount)}
               </p>
             </div>
@@ -301,7 +302,7 @@ export default function DepositMethodPage() {
           <div className="my-4 h-px w-full bg-slate-200" />
 
           {/* MODAL BUTTON — nominal cepat */}
-          <p className="mb-2 text-[12px] font-semibold text-slate-500">Pilih nominal cepat</p>
+          <p className="mb-2 text-[12px] font-semibold text-slate-500 dark:text-slate-400">Pilih nominal cepat</p>
           <div className="grid grid-cols-3 gap-2">
             {QUICK_AMOUNTS.map((value) => {
               const active = amount === value;
@@ -315,8 +316,8 @@ export default function DepositMethodPage() {
                   }}
                   className={`h-12 rounded-xl border text-[13px] font-extrabold transition-all active:scale-95 ${
                     active
-                      ? 'border-cyan-400 bg-cyan-50 text-cyan-700 shadow-[0_10px_24px_-16px_rgba(72,198,229,1)]'
-                      : 'border-slate-200 bg-white text-slate-700 hover:border-cyan-200 hover:bg-cyan-50/40'
+                      ? 'border-cyan-400 bg-cyan-50 text-cyan-700 shadow-[0_10px_24px_-16px_rgba(72,198,229,1)] dark:bg-cyan-950/40'
+                      : 'border-slate-200 bg-white text-slate-700 hover:border-cyan-200 hover:bg-cyan-50/40 dark:text-slate-200 dark:bg-slate-900 dark:border-slate-700'
                   }`}
                 >
                   Rp. {value.toLocaleString('id-ID')}
@@ -326,11 +327,11 @@ export default function DepositMethodPage() {
           </div>
 
           {/* INPUT — nominal manual (angka saja) */}
-          <label htmlFor="deposit-amount" className="mb-1.5 mt-5 block text-[12px] font-semibold text-slate-500">
+          <label htmlFor="deposit-amount" className="mb-1.5 mt-5 block text-[12px] font-semibold text-slate-500 dark:text-slate-400">
             Nominal deposit
           </label>
           <div className="relative">
-            <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[13.5px] font-bold text-slate-400">
+            <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[13.5px] font-bold text-slate-400 dark:text-slate-400">
               Rp
             </span>
             <input
@@ -349,10 +350,10 @@ export default function DepositMethodPage() {
                 if (e.key === 'Enter') void confirm();
               }}
               placeholder="Masukkan nominal"
-              className={`h-12 w-full rounded-xl border bg-white pl-11 pr-3.5 font-mono text-[15px] font-bold text-slate-900 outline-none transition-colors focus:ring-4 ${
+              className={`h-12 w-full rounded-xl border bg-white pl-11 pr-3.5 font-mono text-[15px] font-bold text-slate-900 outline-none transition-colors focus:ring-4 dark:text-white dark:bg-slate-900 ${
                 amountError
                   ? 'border-rose-300 focus:border-rose-400 focus:ring-rose-500/10'
-                  : 'border-slate-200 focus:border-cyan-400 focus:ring-cyan-500/10'
+                  : 'border-slate-200 focus:border-cyan-400 focus:ring-cyan-500/10 dark:border-slate-700'
               }`}
             />
           </div>
@@ -362,28 +363,28 @@ export default function DepositMethodPage() {
               {amountError}
             </p>
           ) : (
-            <p className="mt-1.5 text-[11px] text-slate-400">
+            <p className="mt-1.5 text-[11px] text-slate-400 dark:text-slate-400">
               Hanya angka, tanpa titik atau koma. Biaya channel {formatRupiah(fee)}.
             </p>
           )}
 
           {/* 2 KARTU RINGKASAN — Total Bayar & Estimasi Saldo */}
           <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:bg-slate-800/60 dark:border-slate-700">
+              <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                 <Receipt className="h-3.5 w-3.5" strokeWidth={2.4} />
                 Total Bayar
               </p>
-              <p className="mt-1.5 text-[22px] font-black leading-none text-slate-900">
+              <p className="mt-1.5 text-[22px] font-black leading-none text-slate-900 dark:text-white">
                 {formatRupiah(amount + fee)}
               </p>
-              <p className="mt-1.5 text-[10.5px] text-slate-500">
+              <p className="mt-1.5 text-[10.5px] text-slate-500 dark:text-slate-400">
                 Deposit {formatRupiah(amount)}
                 {fee > 0 ? ` + biaya ${formatRupiah(fee)}` : ' · tanpa biaya'}
               </p>
             </div>
 
-            <div className="rounded-xl border-2 border-cyan-400 bg-cyan-50 p-4">
+            <div className="rounded-xl border-2 border-cyan-400 bg-cyan-50 p-4 dark:bg-cyan-950/40">
               <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-cyan-700">
                 <Wallet className="h-3.5 w-3.5" strokeWidth={2.4} />
                 Estimasi Saldo
@@ -401,7 +402,7 @@ export default function DepositMethodPage() {
           <div className="my-4 h-px w-full bg-slate-200" />
 
           {/* DATA PELANGGAN — isi body request Tripay */}
-          <p className="mb-2 text-[12px] font-semibold text-slate-500">Data pelanggan</p>
+          <p className="mb-2 text-[12px] font-semibold text-slate-500 dark:text-slate-400">Data pelanggan</p>
           <div className="space-y-2.5">
             <div className="relative">
               <User className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-cyan-500" strokeWidth={2.4} />
@@ -460,7 +461,7 @@ export default function DepositMethodPage() {
             )}
           </button>
 
-          <p className="mt-2 text-center text-[10.5px] text-slate-400">
+          <p className="mt-2 text-center text-[10.5px] text-slate-400 dark:text-slate-400">
             Invoice berlaku 2 jam setelah dibuat · status diperiksa otomatis.
           </p>
         </div>
@@ -474,7 +475,7 @@ export default function DepositMethodPage() {
       {/* MODAL ERROR */}
       {error && (
         <Reveal>
-          <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 p-4">
+          <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 p-4 dark:bg-rose-950/40 dark:border-rose-800/60">
             <div className="flex items-start gap-3">
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-rose-500 text-white shadow-md shadow-rose-500/30">
                 <XCircle className="h-5 w-5" strokeWidth={2.4} />
@@ -483,7 +484,7 @@ export default function DepositMethodPage() {
                 <p className="text-[13.5px] font-extrabold text-rose-800">Invoice gagal dibuat</p>
                 <p className="mt-1 break-words text-[12px] leading-relaxed text-rose-700">{error.message}</p>
                 {error.kind === 'cors' || error.kind === 'network' ? (
-                  <p className="mt-2 break-all rounded-lg bg-white/70 px-3 py-2 font-mono text-[10.5px] leading-relaxed text-rose-700">
+                  <p className="mt-2 break-all rounded-lg bg-white/70 px-3 py-2 font-mono text-[10.5px] leading-relaxed text-rose-700 dark:bg-slate-900/70">
                     fetch(&quot;{config.baseUrl}/transaction/create&quot;) diblokir browser. Solusi: buat endpoint proxy
                     di server Anda, lalu isi URL-nya di panel Pengaturan API Tripay.
                   </p>

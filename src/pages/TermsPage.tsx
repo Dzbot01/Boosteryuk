@@ -9,7 +9,7 @@ export default function TermsPage() {
       intro="Dengan membuat akun, melakukan deposit, atau memesan layanan Boosteryuk, Anda menyetujui ketentuan berikut."
       icon={FileText}
     >
-      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-400">
         Terakhir diperbarui: 2026
       </p>
       <TextSection title="1. Akun dan informasi pesanan">

@@ -54,7 +54,8 @@ export default function ProfilPage() {
   ];
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-10 sm:px-6">
+    // page-align-left: di desktop kolom ini rata kiri sejajar header (lihat index.css)
+    <div className="page-align-left mx-auto max-w-2xl px-4 py-10 sm:px-6">
       <button
         onClick={() => navigate('/')}
         className="mb-6 inline-flex items-center gap-2 rounded-xl px-3 py-2 text-[13.5px] font-semibold text-slate-500 transition-all hover:bg-slate-100 hover:text-slate-900 active:scale-95 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
@@ -215,7 +216,7 @@ export default function ProfilPage() {
               Diperbarui 3 bulan lalu
             </span>
           </span>
-          <Pencil className="h-3.5 w-3.5 text-slate-400" />
+          <Pencil className="h-3.5 w-3.5 text-slate-400 dark:text-slate-400" />
         </button>
       </div>
 

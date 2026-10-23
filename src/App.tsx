@@ -28,41 +28,13 @@ import AdminWebsitePage from './pages/admin/AdminWebsitePage';
 import AdminServerPage from './pages/admin/AdminServerPage';
 import AdminProfitPage from './pages/admin/AdminProfitPage';
 import AdminBroadcastPage from './pages/admin/AdminBroadcastPage';
-import { useEffect, useState } from 'react';
-import { mintaIzinNotif } from './firebase';
-
-function AutoNotif() {
-  const [show, setShow] = useState(false);
-  useEffect(() => {
-    if (Notification.permission!== 'default') return;
-    if (localStorage.getItem("notif_diminta")) return;
-    const t = setTimeout(() => setShow(true), 3000);
-    return () => clearTimeout(t);
-  }, []);
-  if (!show) return null;
-  return (
-    <div className="fixed bottom-5 left-4 right-4 z-[999] sm:left-1/2 sm:right-auto sm:-translate-x-1/2 sm:w-[380px] animate-fade-in">
-      <div className="rounded-[20px] bg-white p-4 shadow-2xl border border-slate-200 dark:bg-slate-800 dark:border-slate-700">
-        <div className="flex gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-500 text-white">🔔</span>
-          <div className="flex-1">
-            <p className="text-[14px] font-bold text-slate-900 dark:text-white">Aktifkan Notifikasi?</p>
-            <p className="mt-1 text-[12.5px] text-slate-500 dark:text-slate-400">Dapetin info harga & promo terbaru langsung di HP kamu.</p>
-          </div>
-        </div>
-        <div className="mt-4 flex gap-2">
-          <button onClick={() => { setShow(false); localStorage.setItem("notif_diminta", "1"); }} className="flex-1 h-10 rounded-xl bg-slate-100 text-[13px] font-bold text-slate-600 dark:bg-slate-700 dark:text-slate-300">Nanti</button>
-          <button onClick={async () => { setShow(false); localStorage.setItem("notif_diminta", "1"); await mintaIzinNotif(); }} className="flex-1 h-10 rounded-xl bg-cyan-600 text-[13px] font-bold text-white">Aktifkan</button>
-        </div>
-      </div>
-    </div>
-  );
-}
+// Popup "Aktifkan Notifikasi?" (AutoNotif) dihapus atas permintaan: tidak ada lagi
+// prompt push notifikasi otomatis saat halaman dibuka. Fungsi mintaIzinNotif di
+// ./firebase tetap ada bila nanti ingin dipicu dari tombol pengaturan.
 
 export default function App() {
   return (
     <MusicProvider>
-       <AutoNotif />
       <Routes>
         <Route element={<Layout />}>
           <Route index element={<HomePage />} />

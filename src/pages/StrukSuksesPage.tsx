@@ -104,7 +104,8 @@ export default function StrukSuksesPage() {
   };
 
   return (
-    <div className="mx-auto flex min-h-[calc(100vh-60px)] w-full max-w-md flex-col items-center px-4 py-8 sm:px-6">
+    // page-align-left: di desktop kolom ini rata kiri sejajar header (lihat index.css)
+    <div className="page-align-left mx-auto flex min-h-[calc(100vh-60px)] w-full max-w-md flex-col items-center px-4 py-8 sm:px-6">
       <Reveal>
         <button
           onClick={() => navigate('/struk')}

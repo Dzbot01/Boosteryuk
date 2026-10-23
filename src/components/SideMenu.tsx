@@ -154,19 +154,14 @@ export default function SideMenu({ isOpen, onClose }: SideMenuProps) {
           <div className="absolute -right-10 -top-12 h-40 w-40 rounded-full bg-white/10 blur-xl" />
           <div className="bg-dots absolute inset-0 opacity-20" />
           <div className="relative flex items-start justify-between">
-            <div className="flex items-center gap-3">
-              <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/95 shadow-lg ring-2 ring-white/40">
-                <img src={settings.logoUrl} alt="Logo" className="h-8 w-8 object-contain" />
-              </span>
-              <div>
-                <p className="font-display text-base font-extrabold text-white">
-                  {settings.brandName}
-                  {settings.brandSuffix}
-                </p>
-                <p className="text-xs font-medium text-cyan-100/80">
-                  {isAdmin? 'Admin Panel' : 'Social Media Booster'}
-                </p>
-              </div>
+            {/* Logo & nama brand di atas menu dihapus; diganti satu judul pertanyaan. */}
+            <div className="min-w-0 pr-3">
+              <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-cyan-100/80">
+                {isAdmin? 'Admin Panel' : 'Menu'}
+              </p>
+              <h2 className="mt-1 font-display text-[19px] font-extrabold leading-snug text-white">
+                Apa yang sedang kamu butuhkan?
+              </h2>
             </div>
             <button
               onClick={onClose}
@@ -219,7 +214,7 @@ export default function SideMenu({ isOpen, onClose }: SideMenuProps) {
                         </span>
                         <span
                           className={`block truncate text-[11px] ${
-                            isActive? 'text-cyan-100/80' : 'text-slate-400 dark:text-slate-500'
+                            isActive? 'text-white/90' : 'text-slate-400 dark:text-slate-500' /* subjudul item aktif: cyan-100/80 → white/90 agar kontras cukup */
                           }`}
                         >
                           {item.desc}
@@ -274,7 +269,7 @@ export default function SideMenu({ isOpen, onClose }: SideMenuProps) {
                           </span>
                           <span
                             className={`block truncate text-[11px] ${
-                              isActive? 'text-cyan-100/80' : 'text-slate-400 dark:text-slate-500'
+                              isActive? 'text-white/90' : 'text-slate-400 dark:text-slate-500' /* subjudul item aktif: cyan-100/80 → white/90 agar kontras cukup */
                             }`}
                           >
                             {item.desc}
@@ -284,7 +279,7 @@ export default function SideMenu({ isOpen, onClose }: SideMenuProps) {
                           <span
                             className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
                               isActive
-                               ? 'bg-white text-cyan-700'
+                               ? 'bg-white text-cyan-700 dark:bg-slate-900'
                                 : 'bg-cyan-50 text-cyan-600 ring-1 ring-cyan-100 dark:bg-cyan-900/30 dark:text-cyan-400 dark:ring-cyan-700/40'
                             }`}
                           >
@@ -332,7 +327,8 @@ export default function SideMenu({ isOpen, onClose }: SideMenuProps) {
               </span>
             </button>
           )}
-          <p className="mt-2 text-center text-[10px] font-medium text-slate-300 dark:text-slate-600">
+          {/* dark:text-slate-600 terlalu redup di latar gelap → dinaikkan ke slate-500 */}
+          <p className="mt-2 text-center text-[10px] font-medium text-slate-400 dark:text-slate-500">
             {settings.brandName}
             {settings.brandSuffix} v1.0.0
           </p>

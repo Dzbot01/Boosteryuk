@@ -43,8 +43,41 @@
   --color-sky-950: #083344;
 }
 
+/* Token warna untuk komponen yang memakai style inline (BuatPesananCard, OrderVpsPage).
+   Nilai terang = warna lama; nilai .dark menjaga teks tetap terbaca di tema gelap. */
+:root {
+  --by-primary: #48c6e5;
+  --by-ink: #172033;
+  --by-ink-2: #667085;
+  --by-line: #e5e7eb;
+  --by-surface: #ffffff;
+  --by-muted: #f8fafc;
+  --by-placeholder: #98a2b3;
+  --by-active: #f0f9fd;
+}
+.dark {
+  --by-primary: #5fd3ef;
+  --by-ink: #f1f5f9;
+  --by-ink-2: #a3b1c6;
+  --by-line: #334155;
+  --by-surface: #0f172a;
+  --by-muted: #1e293b;
+  --by-placeholder: #7c8aa0;
+  --by-active: rgba(34, 211, 238, 0.12);
+}
+
 html {
   scroll-behavior: smooth;
+}
+
+/* Desktop (≥ lg): kolom halaman yang sempit (max-w-md … max-w-4xl) dibuat rata kiri,
+   sejajar dengan tepi kiri kontainer header (max-w-6xl = 72rem), bukan di tengah layar.
+   Lebar kolom tetap; mobile/tablet tidak berubah. */
+@media (min-width: 64rem) {
+  .page-align-left {
+    margin-left: max(0px, calc((100% - 72rem) / 2));
+    margin-right: auto;
+  }
 }
 
 body {

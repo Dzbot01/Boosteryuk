@@ -7,10 +7,13 @@ import { AuthProvider } from './context/AuthContext';
 import { SiteSettingsProvider } from './context/SiteSettingsContext';
 import { DepositProvider } from './context/DepositContext';
 import { OrderHistoryProvider } from './context/OrderHistoryContext';
+import { LanguageProvider } from './i18n';
 import './index.css';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
+    {/* LanguageProvider paling luar agar semua teks (termasuk modal/portal) ikut diterjemahkan */}
+    <LanguageProvider>
     <ThemeProvider>
       <SiteSettingsProvider>
         <AuthProvider>
@@ -24,5 +27,6 @@ createRoot(document.getElementById('root')!).render(
         </AuthProvider>
       </SiteSettingsProvider>
     </ThemeProvider>
+    </LanguageProvider>
   </StrictMode>,
 );

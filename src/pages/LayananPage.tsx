@@ -36,10 +36,14 @@ export default function LayananPage() {
         </button>
       </Reveal>
 
-      {/* ================= SLIDER ================= */}
+      {/* Desktop (lg+): dua kolom — form Buat Pesanan rata kiri (lebar tetap), slider di kanan
+          dengan ukuran lebih kecil & sticky. Mobile: slider di atas, form di bawah (seperti semula). */}
+      <div className="lg:grid lg:grid-cols-[440px_minmax(0,1fr)] lg:items-start lg:gap-8">
+        {/* ================= SLIDER ================= */}
+        <div className="lg:sticky lg:top-24 lg:order-2">
       <Reveal delay={40}>
         <div
-          className="relative aspect-[16/9] w-full overflow-hidden rounded-[28px] border border-slate-200 shadow-[0_24px_60px_-30px_rgba(15,23,42,0.5)] dark:border-slate-700/60 sm:aspect-[21/9]"
+          className="relative aspect-[16/9] w-full overflow-hidden rounded-[28px] lg:!aspect-[16/10] border border-slate-200 shadow-[0_24px_60px_-30px_rgba(15,23,42,0.5)] dark:border-slate-700/60 sm:aspect-[21/9]"
           onMouseEnter={() => (paused.current = true)}
           onMouseLeave={() => (paused.current = false)}
         >
@@ -75,7 +79,7 @@ export default function LayananPage() {
                 onClick={() => setIndex(i)}
                 aria-label={`Slide ${i + 1}`}
                 className={`h-1.5 rounded-full transition-all duration-300 ${
-                  i === index ? 'w-6 bg-white' : 'w-1.5 bg-white/50 hover:bg-white/80'
+                  i === index ? 'w-6 bg-white' : 'w-1.5 bg-white/50 hover:bg-white/80' /* titik slider tetap putih di atas foto, juga di tema dark */
                 }`}
               />
             ))}
@@ -83,12 +87,14 @@ export default function LayananPage() {
         </div>
       </Reveal>
 
-      {/* ================= BUAT PESANAN CARD ================= */}
-      <Reveal delay={120}>
-        <div className="mt-8">
-          <BuatPesananCard />
         </div>
-      </Reveal>
+
+        {/* ================= BUAT PESANAN CARD ================= */}
+        {/* order diletakkan di Reveal (anak langsung grid) agar kolom kiri benar-benar form */}
+        <Reveal delay={120} className="mt-8 lg:order-1 lg:mt-0">
+          <BuatPesananCard />
+        </Reveal>
+      </div>
     </div>
   );
 }

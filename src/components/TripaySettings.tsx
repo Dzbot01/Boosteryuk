@@ -46,24 +46,24 @@ export default function TripaySettings({
   };
 
   const fieldClass =
-    'h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-[12.5px] font-medium text-slate-800 outline-none transition-colors focus:border-cyan-400 focus:ring-4 focus:ring-cyan-500/10';
+    'h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-[12.5px] font-medium text-slate-800 outline-none transition-colors focus:border-cyan-400 focus:ring-4 focus:ring-cyan-500/10 dark:text-slate-100 dark:bg-slate-900 dark:border-slate-700';
 
   return (
     <Reveal delay={110}>
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:bg-slate-900 dark:border-slate-700">
         {/* Header panel — klik untuk membuka/menutup */}
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
-          className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50"
+          className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50 dark:hover:bg-slate-800"
         >
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-900 text-white">
             <Settings2 className="h-4 w-4" strokeWidth={2.4} />
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block text-[13px] font-extrabold text-slate-900">Pengaturan API Tripay</span>
-            <span className="block truncate text-[11px] text-slate-500">
+            <span className="block text-[13px] font-extrabold text-slate-900 dark:text-white">Pengaturan API Tripay</span>
+            <span className="block truncate text-[11px] text-slate-500 dark:text-slate-400">
               {config.baseUrl === TRIPAY_PRODUCTION ? 'Production' : 'Sandbox'} ·{' '}
               {config.proxyUrl.trim() ? `proxy aktif` : 'tanpa proxy (rawan diblokir CORS)'}
             </span>
@@ -71,8 +71,8 @@ export default function TripaySettings({
           <span
             className={`shrink-0 rounded-full px-2 py-0.5 text-[9.5px] font-extrabold uppercase tracking-wide ${
               config.baseUrl === TRIPAY_PRODUCTION
-                ? 'bg-rose-50 text-rose-600 ring-1 ring-rose-200'
-                : 'bg-amber-50 text-amber-600 ring-1 ring-amber-200'
+                ? 'bg-rose-50 text-rose-600 ring-1 ring-rose-200 dark:bg-rose-950/40'
+                : 'bg-amber-50 text-amber-600 ring-1 ring-amber-200 dark:bg-amber-950/40'
             }`}
           >
             {config.baseUrl === TRIPAY_PRODUCTION ? 'Live' : 'Sandbox'}
@@ -81,9 +81,9 @@ export default function TripaySettings({
 
         {/* Isi panel */}
         {open && (
-          <div className="border-t border-slate-100 px-4 py-4">
+          <div className="border-t border-slate-100 px-4 py-4 dark:border-slate-800">
             {/* Peringatan keamanan */}
-            <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5">
+            <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 dark:bg-amber-950/40 dark:border-amber-800/60">
               <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" strokeWidth={2.4} />
               <p className="text-[11px] leading-relaxed text-amber-800">
                 <span className="font-extrabold">Private Key di browser = tidak aman.</span> Siapa pun yang membuka
@@ -94,7 +94,7 @@ export default function TripaySettings({
             </div>
 
             {/* Toggle environment */}
-            <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wide text-slate-500">
+            <label className="mb-1.5 block text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
               Environment
             </label>
             <div className="mb-4 grid grid-cols-2 gap-2">
@@ -110,14 +110,14 @@ export default function TripaySettings({
                     onClick={() => update({ baseUrl: env.url })}
                     className={`rounded-xl border px-3 py-2.5 text-left transition-all active:scale-[0.98] ${
                       active
-                        ? 'border-cyan-400 bg-cyan-50 shadow-[0_10px_24px_-18px_rgba(72,198,229,1)]'
-                        : 'border-slate-200 bg-white hover:border-cyan-200'
+                        ? 'border-cyan-400 bg-cyan-50 shadow-[0_10px_24px_-18px_rgba(72,198,229,1)] dark:bg-cyan-950/40'
+                        : 'border-slate-200 bg-white hover:border-cyan-200 dark:bg-slate-900 dark:border-slate-700'
                     }`}
                   >
-                    <span className={`block text-[12.5px] font-extrabold ${active ? 'text-cyan-700' : 'text-slate-800'}`}>
+                    <span className={`block text-[12.5px] font-extrabold ${active ? 'text-cyan-700' : 'text-slate-800 dark:text-slate-100'}`}>
                       {env.label}
                     </span>
-                    <span className="block font-mono text-[10px] text-slate-400">{env.hint}</span>
+                    <span className="block font-mono text-[10px] text-slate-400 dark:text-slate-400">{env.hint}</span>
                   </button>
                 );
               })}
@@ -126,7 +126,7 @@ export default function TripaySettings({
             {/* API Key & Private Key */}
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
-                <label htmlFor="tripay-apikey" className="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                <label htmlFor="tripay-apikey" className="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                   <KeyRound className="h-3 w-3" strokeWidth={2.6} />
                   API Key
                 </label>
@@ -141,7 +141,7 @@ export default function TripaySettings({
                 />
               </div>
               <div>
-                <label htmlFor="tripay-privatekey" className="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                <label htmlFor="tripay-privatekey" className="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                   <KeyRound className="h-3 w-3" strokeWidth={2.6} />
                   Private Key
                 </label>
@@ -159,7 +159,7 @@ export default function TripaySettings({
                     type="button"
                     onClick={() => setShowSecret((v) => !v)}
                     aria-label={showSecret ? 'Sembunyikan kunci' : 'Tampilkan kunci'}
-                    className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200 dark:text-slate-400"
                   >
                     {showSecret ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                   </button>
@@ -169,8 +169,8 @@ export default function TripaySettings({
 
             {/* Proxy / callback / return */}
             <div className="mt-3">
-              <label htmlFor="tripay-proxy" className="mb-1.5 block text-[11px] font-bold uppercase tracking-wide text-slate-500">
-                URL Proxy / Backend <span className="font-medium normal-case text-slate-400">(opsional)</span>
+              <label htmlFor="tripay-proxy" className="mb-1.5 block text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                URL Proxy / Backend <span className="font-medium normal-case text-slate-400 dark:text-slate-400">(opsional)</span>
               </label>
               <input
                 id="tripay-proxy"
@@ -180,7 +180,7 @@ export default function TripaySettings({
                 className={`${fieldClass} font-mono`}
                 placeholder="https://domainanda.com/api/tripay-proxy.php"
               />
-              <p className="mt-1 text-[10.5px] text-slate-400">
+              <p className="mt-1 text-[10.5px] text-slate-400 dark:text-slate-400">
                 Proxy akan menerima <span className="font-mono">?target=&lt;url-tripay&gt;</span> lalu meneruskan
                 request beserta header Authorization dari sisi server.
               </p>
@@ -188,15 +188,15 @@ export default function TripaySettings({
 
             {/* Preview signature HMAC-SHA256 dari form aktif */}
             {signaturePreview && (
-              <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+              <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:bg-slate-800/60 dark:border-slate-700">
+                <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                   Signature (HMAC-SHA256)
                 </p>
-                <p className="break-all font-mono text-[10.5px] leading-relaxed text-slate-500">
+                <p className="break-all font-mono text-[10.5px] leading-relaxed text-slate-500 dark:text-slate-400">
                   hash(<span className="text-cyan-600">{signaturePreview.merchantRef}</span> +{' '}
                   <span className="text-cyan-600">{signaturePreview.amount}</span>, privateKey)
                 </p>
-                <p className="mt-1.5 break-all font-mono text-[10.5px] font-bold leading-relaxed text-slate-900">
+                <p className="mt-1.5 break-all font-mono text-[10.5px] font-bold leading-relaxed text-slate-900 dark:text-white">
                   {signaturePreview.signature}
                 </p>
               </div>
@@ -219,7 +219,7 @@ export default function TripaySettings({
               <button
                 type="button"
                 onClick={reset}
-                className="flex h-10 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 text-[12.5px] font-bold text-slate-600 transition-all hover:border-slate-300 hover:bg-slate-50 active:scale-[0.98]"
+                className="flex h-10 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 text-[12.5px] font-bold text-slate-600 transition-all hover:border-slate-300 hover:bg-slate-50 active:scale-[0.98] dark:text-slate-300 dark:bg-slate-900 dark:border-slate-700 dark:hover:bg-slate-800"
               >
                 <RotateCcw className="h-3.5 w-3.5" strokeWidth={2.6} />
                 Reset
