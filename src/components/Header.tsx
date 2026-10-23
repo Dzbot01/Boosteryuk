@@ -58,19 +58,16 @@ export default function Header({ onMenuClick }: HeaderProps) {
   const showUserIcon =!!user &&!isAdmin;
 
   return (
-    // Di atas halaman: header polos tanpa card. Setelah di-scroll: card mengambang transparan (glass).
+    // Posisi, lebar, dan ukuran header selalu sama. Di atas halaman latarnya polos;
+    // setelah di-scroll hanya latar transparan (glass) yang muncul, tetap rata kiri-kanan.
     <header
-      className={`fixed left-0 right-0 top-0 z-30 w-full transition-[padding] duration-300 ease-out ${
-        scrolled ? 'px-3 pt-2 sm:px-4' : 'px-0 pt-0'
+      className={`fixed left-0 right-0 top-0 z-30 w-full border-b transition-[background-color,border-color,box-shadow,backdrop-filter] duration-300 ease-out ${
+        scrolled
+          ? 'border-slate-200/70 bg-white/55 shadow-[0_8px_24px_-16px_rgba(15,23,42,0.35)] backdrop-blur-xl backdrop-saturate-150 dark:border-slate-700/50 dark:bg-slate-900/55'
+          : 'border-transparent bg-transparent shadow-none'
       }`}
     >
-      <div
-        className={`mx-auto flex max-w-6xl items-center justify-between border px-4 py-3 transition-all duration-300 ease-out sm:px-6 ${
-          scrolled
-            ? 'rounded-2xl border-white/60 bg-white/55 shadow-[0_10px_30px_-12px_rgba(15,23,42,0.25)] backdrop-blur-xl backdrop-saturate-150 dark:border-slate-700/50 dark:bg-slate-900/55'
-            : 'rounded-none border-transparent bg-transparent shadow-none'
-        }`}
-      >
+      <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
         {/* Brand */}
         <Link to={isAdmin? '/admin' : '/'} className="group flex items-center gap-3">
           <img

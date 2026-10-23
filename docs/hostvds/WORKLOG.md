@@ -33,3 +33,7 @@
   - Vercel Authentication diubah ke "preview only" agar URL production kedua project bisa diakses publik.
   - Tambah `vercel.json` (rewrite SPA) supaya deep link seperti `/ordervps` tidak 404.
   - Catatan: project belum terhubung Git → push berikutnya tidak auto-deploy; deploy ulang manual atau hubungkan repo di Vercel.
+
+## 2026-10-23 — Revisi header (feedback user)
+- Header saat scroll tidak lagi berupa card mengambang (inset + rounded). Posisi, lebar (rata kiri-kanan), tinggi dan isi header **identik** dengan saat di atas; yang berubah hanya latar: transparan → glass `bg-white/55` + blur + garis bawah tipis.
+- Diverifikasi di Chromium: bounding box header & isi sama persis sebelum/sesudah scroll (desktop 1280×69, mobile 390×69), radius 0, lebar penuh.
