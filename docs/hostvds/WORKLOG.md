@@ -21,3 +21,9 @@
 - Commit `728b65d` (owner) menghapus `[assets]` dari `wrangler.toml` → Worker kini hanya API, frontend di-host Vercel.
 - Akibatnya `fetch('/api/vps/catalog')` same-origin tidak sampai ke Worker → halaman selalu fallback. Fix: `vpsApi.ts` memanggil `https://boosteryuk.boosteryukid.workers.dev` (override `VITE_VPS_API_URL`). CORS Worker sudah `*`.
 - Tambah `src/vite-env.d.ts` (tipe `import.meta.env`) → error TS frontend 11 → 9.
+
+## 2026-10-23 — Header scroll + mode demo + 2 deployment Vercel
+- `Header.tsx`: di posisi paling atas header polos (tanpa card/border/bayangan); setelah scroll > 12px berubah jadi card mengambang transparan (glass, `bg-white/55` + blur). Transisi 300ms, listener scroll pasif + rAF.
+- `AuthContext.tsx`: `VITE_DEMO_MODE=true` → `DemoAuthProvider` (langsung login sebagai user demo, tanpa memanggil API auth). Tanpa env ini `RealAuthProvider` = logika lama tanpa perubahan; kode demo ikut terbuang dari bundle production (diverifikasi: string `demo-token` tidak ada di bundle prod).
+- Badge "DEMO" di header hanya pada build demo.
+- Deploy: 2 project Vercel baru — production (auth asli) dan testing (demo).
