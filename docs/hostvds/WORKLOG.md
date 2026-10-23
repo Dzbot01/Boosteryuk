@@ -27,3 +27,9 @@
 - `AuthContext.tsx`: `VITE_DEMO_MODE=true` → `DemoAuthProvider` (langsung login sebagai user demo, tanpa memanggil API auth). Tanpa env ini `RealAuthProvider` = logika lama tanpa perubahan; kode demo ikut terbuang dari bundle production (diverifikasi: string `demo-token` tidak ada di bundle prod).
 - Badge "DEMO" di header hanya pada build demo.
 - Deploy: 2 project Vercel baru — production (auth asli) dan testing (demo).
+- Vercel (akun masciosa-7110, project baru, deploy dari branch `feat/header-scroll-demo-mode` @ `aa6ef3a`):
+  - Production (auth asli): https://boosteryuk-production.vercel.app — bundle `index-CyIj9d_D.js` = build prod yang dites.
+  - Testing (demo, `VITE_DEMO_MODE=true`): https://boosteryuk-testing.vercel.app — bundle `index-DfpRFx2M.js` = build demo yang dites.
+  - Vercel Authentication diubah ke "preview only" agar URL production kedua project bisa diakses publik.
+  - Tambah `vercel.json` (rewrite SPA) supaya deep link seperti `/ordervps` tidak 404.
+  - Catatan: project belum terhubung Git → push berikutnya tidak auto-deploy; deploy ulang manual atau hubungkan repo di Vercel.
