@@ -37,3 +37,16 @@
 ## 2026-10-23 — Revisi header (feedback user)
 - Header saat scroll tidak lagi berupa card mengambang (inset + rounded). Posisi, lebar (rata kiri-kanan), tinggi dan isi header **identik** dengan saat di atas; yang berubah hanya latar: transparan → glass `bg-white/55` + blur + garis bawah tipis.
 - Diverifikasi di Chromium: bounding box header & isi sama persis sebelum/sesudah scroll (desktop 1280×69, mobile 390×69), radius 0, lebar penuh.
+
+## 2026-10-23 — UI polish, i18n, dark mode, loading modal, WhatsApp preview
+Permintaan user (satu batch), semua dengan komentar di kode yang berubah:
+1. **Teks:** "Kata mereka yang puas." → "Apa kata mereka." (`ReviewsSection`).
+2. **Desktop:** halaman Layanan jadi 2 kolom (form Buat Pesanan rata kiri 440px, slider kanan 16:10 sticky); slider OrderVps `lg:aspect-[3/1]`; utility `.page-align-left` (index.css) membuat kolom sempit di 17 halaman rata kiri sejajar header di ≥ lg. Mobile tidak berubah.
+3. **Dihapus:** banner push notifikasi (`PushBanner`), popup "Aktifkan Notifikasi?" (`AutoNotif` di App.tsx), titik indikator di tombol menu header.
+4. **Bahasa:** `src/i18n` — LanguageProvider (localStorage `bt-lang`), toggle geser/klik di Pengaturan, penerjemah DOM (MutationObserver) + kamus `en.ts` (≈710 entri, diekstrak otomatis dari JSX via TS compiler lalu diterjemahkan) + pola teks dinamis. Diverifikasi: 19 halaman EN → hanya 2 teks sengaja tidak diterjemahkan (format struk yang di-parse & template pesan WA ke admin). Kembali ke ID mengembalikan teks asli.
+5. **Dark mode:** akar masalah = komponen tanpa varian `dark:` + warna inline hex. Fix: token `--by-*` (index.css) untuk BuatPesananCard/OrderVpsPage, codemod yang hanya MENAMBAH varian `dark:` (teks/latar/border/hover) di 29 file (mode terang tidak berubah), pengecualian manual (titik slider, knob toggle, struk kertas putih). Audit kontras otomatis: 213 → 16 teks kontras rendah (sisa = tombol brand, sama di mode terang).
+6. **Loading modal:** `InfoModal` (pengumuman tiap buka/refresh) diganti `AuthLoadingModal` — tampil sekali saat auth pertama dimuat. `ProtectedRoute` menunggu `loading` (refresh halaman login-only tidak lagi terlempar ke beranda). Bug overlay tertinggal (timer terbatalkan cleanup) ditemukan saat QA & diperbaiki.
+7. **Menu navbar:** logo & nama brand di header menu dihapus; judul "Apa yang sedang kamu butuhkan?".
+8. **WhatsApp preview:** meta OG/Twitter baru + `public/og-image.jpg` (1200×630 JPG 99 KB). URL absolut via plugin `siteUrlPlugin` (vite.config.ts): VITE_SITE_URL → domain production Vercel → boosteryuk.com.
+   - Screenshot asli boosteryuk.com berhasil diambil di Vercel Sandbox (meta live masih menunjuk cekidku.my.id), tapi file tidak bisa ditransfer keluar sandbox (respons tool dipotong ~2 KB, host sandbox diblokir dari container). Gambar akhirnya diambil dari build production repo yang sama (kode identik dengan boosteryuk.com), aset eksternal yang diblokir disembunyikan.
+9. **Deploy & verifikasi (PR #4, `6c3a689`):** Vercel `boosteryuk-production` (dpl_GfQNa999…) & `boosteryuk-testing` (dpl_ACQsdM4g…) READY. HTML live berisi `og:image` absolut ke domain masing-masing; `/og-image.jpg?v=3` → 200 `image/jpeg` 98.906 B. Workers Builds preview Cloudflare gagal (pola lama untuk branch non-main, kode worker tidak disentuh) — dikomentari di PR #4.

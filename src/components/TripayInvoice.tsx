@@ -21,11 +21,11 @@ import { qrImageUrl, type TripayTransaction } from '../services/tripay';
  * ============================================================= */
 
 const STATUS_STYLE: Record<string, { label: string; wrap: string; dot: string }> = {
-  UNPAID: { label: 'Menunggu pembayaran', wrap: 'bg-amber-50 text-amber-700 ring-amber-200', dot: 'bg-amber-500' },
-  PENDING: { label: 'Diproses', wrap: 'bg-sky-50 text-sky-700 ring-sky-200', dot: 'bg-sky-500' },
-  PAID: { label: 'Lunas', wrap: 'bg-emerald-50 text-emerald-700 ring-emerald-200', dot: 'bg-emerald-500' },
-  FAILED: { label: 'Gagal', wrap: 'bg-rose-50 text-rose-700 ring-rose-200', dot: 'bg-rose-500' },
-  EXPIRED: { label: 'Kedaluwarsa', wrap: 'bg-slate-100 text-slate-600 ring-slate-200', dot: 'bg-slate-400' },
+  UNPAID: { label: 'Menunggu pembayaran', wrap: 'bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-950/40', dot: 'bg-amber-500' },
+  PENDING: { label: 'Diproses', wrap: 'bg-sky-50 text-sky-700 ring-sky-200 dark:bg-sky-950/40', dot: 'bg-sky-500' },
+  PAID: { label: 'Lunas', wrap: 'bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/40', dot: 'bg-emerald-500' },
+  FAILED: { label: 'Gagal', wrap: 'bg-rose-50 text-rose-700 ring-rose-200 dark:bg-rose-950/40', dot: 'bg-rose-500' },
+  EXPIRED: { label: 'Kedaluwarsa', wrap: 'bg-slate-100 text-slate-600 ring-slate-200 dark:text-slate-300 dark:bg-slate-800 dark:ring-slate-700', dot: 'bg-slate-400' },
   REFUND: { label: 'Refund', wrap: 'bg-violet-50 text-violet-700 ring-violet-200', dot: 'bg-violet-500' },
 };
 
@@ -48,7 +48,7 @@ function StepText({ text }: { text: string }) {
     <span>
       {parts.map((part, index) =>
         index % 2 === 1 ? (
-          <b key={index} className="font-extrabold text-slate-900">
+          <b key={index} className="font-extrabold text-slate-900 dark:text-white">
             {part}
           </b>
         ) : (
@@ -86,8 +86,8 @@ function CopyButton({ value, label }: { value: string; label: string }) {
 function FeeRow({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
     <div className="flex items-center justify-between gap-3 py-1">
-      <span className="text-[11.5px] text-slate-500">{label}</span>
-      <span className={`font-mono text-[12px] font-bold tabular-nums ${accent ? 'text-cyan-600' : 'text-slate-900'}`}>
+      <span className="text-[11.5px] text-slate-500 dark:text-slate-400">{label}</span>
+      <span className={`font-mono text-[12px] font-bold tabular-nums ${accent ? 'text-cyan-600' : 'text-slate-900 dark:text-white'}`}>
         {value}
       </span>
     </div>
@@ -120,9 +120,9 @@ export default function TripayInvoice({
   void tick;
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_20px_50px_-30px_rgba(15,23,42,.5)]">
+    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_20px_50px_-30px_rgba(15,23,42,.5)] dark:bg-slate-900 dark:border-slate-700">
       {/* Header invoice */}
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 bg-gradient-to-r from-slate-900 to-slate-800 px-4 py-3.5 text-white sm:px-5">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 bg-gradient-to-r from-slate-900 to-slate-800 px-4 py-3.5 text-white sm:px-5 dark:border-slate-800">
         <div className="min-w-0">
           <p className="text-[9.5px] font-extrabold uppercase tracking-[0.22em] text-cyan-300">Invoice Tripay</p>
           <p className="mt-0.5 truncate font-mono text-[13px] font-bold">{transaction.merchant_ref}</p>
@@ -150,13 +150,13 @@ export default function TripayInvoice({
       <div className="px-4 py-4 sm:px-5">
         {/* Countdown */}
         {!isPaid && (
-          <div className={`mb-4 flex items-center gap-2 rounded-xl px-3 py-2.5 ring-1 ${time.done ? 'bg-rose-50 ring-rose-200' : 'bg-slate-50 ring-slate-200'}`}>
+          <div className={`mb-4 flex items-center gap-2 rounded-xl px-3 py-2.5 ring-1 ${time.done ? 'bg-rose-50 ring-rose-200 dark:bg-rose-950/40' : 'bg-slate-50 ring-slate-200 dark:bg-slate-800/60 dark:ring-slate-700'}`}>
             <Clock className={`h-4 w-4 shrink-0 ${time.done ? 'text-rose-500' : 'text-cyan-500'}`} strokeWidth={2.4} />
-            <span className="text-[11.5px] font-semibold text-slate-600">
+            <span className="text-[11.5px] font-semibold text-slate-600 dark:text-slate-300">
               {time.done ? 'Invoice kedaluwarsa — buat invoice baru.' : 'Selesaikan pembayaran dalam'}
             </span>
             {!time.done && (
-              <span className="ml-auto font-mono text-[15px] font-black tabular-nums text-slate-900">{time.text}</span>
+              <span className="ml-auto font-mono text-[15px] font-black tabular-nums text-slate-900 dark:text-white">{time.text}</span>
             )}
           </div>
         )}
@@ -165,18 +165,18 @@ export default function TripayInvoice({
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
           {qrSource ? (
             <div className="mx-auto shrink-0 sm:mx-0">
-              <div className="rounded-2xl bg-white p-2 ring-1 ring-slate-200">
+              <div className="rounded-2xl bg-white p-2 ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-700">
                 <img src={qrSource} alt="QR pembayaran" className="h-48 w-48 rounded-xl object-contain" />
               </div>
-              <p className="mt-1.5 text-center text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+              <p className="mt-1.5 text-center text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-400">
                 Scan dengan e-wallet / m-banking
               </p>
             </div>
           ) : transaction.pay_code ? (
             <div className="w-full sm:max-w-[196px]">
-              <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center">
-                <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-slate-400">Kode Bayar</p>
-                <p className="mt-2 break-all font-mono text-[16px] font-black leading-tight text-slate-900">
+              <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center dark:bg-slate-800/60 dark:border-slate-600">
+                <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-400">Kode Bayar</p>
+                <p className="mt-2 break-all font-mono text-[16px] font-black leading-tight text-slate-900 dark:text-white">
                   {transaction.pay_code}
                 </p>
               </div>
@@ -188,14 +188,14 @@ export default function TripayInvoice({
 
           {/* Rincian biaya */}
           <div className="min-w-0 flex-1">
-            <div className="rounded-xl bg-cyan-50 px-3.5 py-3 ring-1 ring-cyan-100">
+            <div className="rounded-xl bg-cyan-50 px-3.5 py-3 ring-1 ring-cyan-100 dark:bg-cyan-950/40">
               <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-cyan-700">Total tagihan</p>
-              <p className="mt-1 text-[26px] font-black leading-none text-slate-900">
+              <p className="mt-1 text-[26px] font-black leading-none text-slate-900 dark:text-white">
                 {formatRupiah(transaction.amount + transaction.fee_customer)}
               </p>
             </div>
 
-            <div className="mt-3 divide-y divide-slate-100 rounded-xl border border-slate-200 px-3.5 py-2">
+            <div className="mt-3 divide-y divide-slate-100 rounded-xl border border-slate-200 px-3.5 py-2 dark:border-slate-700 dark:divide-slate-800">
               <FeeRow label="Nominal deposit" value={formatRupiah(transaction.amount)} />
               <FeeRow label="Biaya merchant" value={formatRupiah(transaction.fee_merchant)} />
               <FeeRow label="Biaya customer" value={formatRupiah(transaction.fee_customer)} />
@@ -215,7 +215,7 @@ export default function TripayInvoice({
               </a>
             ) : null}
 
-            <p className="mt-2 flex items-center justify-center gap-1.5 text-[10px] font-medium text-slate-400">
+            <p className="mt-2 flex items-center justify-center gap-1.5 text-[10px] font-medium text-slate-400 dark:text-slate-400">
               {polling ? (
                 <>
                   <LoaderCircle className="h-3 w-3 animate-spin" />
@@ -234,7 +234,7 @@ export default function TripayInvoice({
         {/* Instruksi pembayaran dari Tripay */}
         {(transaction.instructions?.length ?? 0) > 0 && (
           <div className="mt-5">
-            <p className="mb-2 text-[11px] font-extrabold uppercase tracking-[0.16em] text-slate-500">
+            <p className="mb-2 text-[11px] font-extrabold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
               Cara pembayaran
             </p>
             <div className="space-y-3">
@@ -242,14 +242,14 @@ export default function TripayInvoice({
                 <details
                   key={group.title}
                   open={index === 0}
-                  className="group rounded-xl border border-slate-200 bg-white open:bg-slate-50"
+                  className="group rounded-xl border border-slate-200 bg-white open:bg-slate-50 dark:bg-slate-900 dark:border-slate-700"
                 >
-                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3.5 py-2.5 text-[12.5px] font-extrabold text-slate-800 transition-colors hover:text-cyan-700">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3.5 py-2.5 text-[12.5px] font-extrabold text-slate-800 transition-colors hover:text-cyan-700 dark:text-slate-100">
                     {group.title}
                     {/* Chevron berputar saat <details> terbuka */}
                     <svg
                       viewBox="0 0 24 24"
-                      className="h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform duration-200 group-open:rotate-180"
+                      className="h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform duration-200 group-open:rotate-180 dark:text-slate-400"
                       fill="none"
                       stroke="currentColor"
                       strokeWidth={2.6}
@@ -260,7 +260,7 @@ export default function TripayInvoice({
                   </summary>
                   <ol className="space-y-2 px-3.5 pb-3.5 pt-1">
                     {group.steps.map((step, index) => (
-                      <li key={index} className="flex gap-2.5 text-[11.5px] leading-relaxed text-slate-600">
+                      <li key={index} className="flex gap-2.5 text-[11.5px] leading-relaxed text-slate-600 dark:text-slate-300">
                         <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-cyan-100 text-[9px] font-extrabold text-cyan-700">
                           {index + 1}
                         </span>

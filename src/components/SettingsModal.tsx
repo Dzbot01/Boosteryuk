@@ -1,8 +1,9 @@
 import { X, Bell, Shield, Globe, Sun, Moon, SlidersHorizontal, Check, Lock, Construction } from 'lucide-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { LOGO_URL } from '../constants';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
+import { useLang, type Lang } from '../i18n';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -42,13 +43,64 @@ function Toggle({
   );
 }
 
+/**
+ * Toggle bahasa yang bisa diklik atau di-swipe: geser ke kanan → English, ke kiri →
+ * Indonesia. Indikator ikut bergeser, dan perubahan langsung menerjemahkan seluruh UI
+ * lewat LanguageProvider.
+ */
+function LanguageSwitch({ lang, onChange }: { lang: Lang; onChange: (lang: Lang) => void }) {
+  const startX = useRef<number | null>(null);
+  const options: Array<{ code: Lang; label: string }> = [
+    { code: 'id', label: 'Indonesia' },
+    { code: 'en', label: 'English' },
+  ];
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Bahasa"
+      data-no-translate
+      onPointerDown={(e) => (startX.current = e.clientX)}
+      onPointerUp={(e) => {
+        if (startX.current === null) return;
+        const dx = e.clientX - startX.current;
+        startX.current = null;
+        if (Math.abs(dx) > 24) onChange(dx > 0 ? 'en' : 'id');
+      }}
+      className="relative grid touch-pan-y select-none grid-cols-2 rounded-xl border border-slate-200 bg-slate-100 p-1 dark:border-slate-700 dark:bg-slate-800"
+    >
+      {/* Indikator yang bergeser mengikuti bahasa aktif */}
+      <span
+        aria-hidden
+        className={`absolute inset-y-1 left-1 w-[calc(50%-4px)] rounded-lg bg-white shadow-sm ring-1 ring-blue-500/40 transition-transform duration-300 ease-out dark:bg-slate-900 ${
+          lang === 'en' ? 'translate-x-full' : 'translate-x-0'
+        }`}
+      />
+      {options.map((l) => (
+        <button
+          key={l.code}
+          role="radio"
+          aria-checked={lang === l.code}
+          onClick={() => onChange(l.code)}
+          className={`relative z-10 flex items-center justify-center gap-1.5 rounded-lg py-2.5 text-[13.5px] font-semibold transition-colors ${
+            lang === l.code ? 'text-blue-700 dark:text-blue-300' : 'text-slate-500 dark:text-slate-400'
+          }`}
+        >
+          {l.label}
+          {lang === l.code && <Check className="h-4 w-4" strokeWidth={2.6} />}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const { theme, setTheme, isDark } = useTheme();
   const { user } = useAuth();
   const [notif, setNotif] = useState(false);
   const [email, setEmail] = useState(false);
   const [whatsapp, setWhatsapp] = useState(false);
-  const [lang, setLang] = useState('id');
+  // Bahasa kini global (LanguageProvider), bukan state lokal modal ini.
+  const { lang, setLang } = useLang();
 
   if (!isOpen) return null;
 
@@ -140,25 +192,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
             {/* ---- Language ---- */}
             <SectionTitle icon={Globe} title="Bahasa" />
-            <div className="grid grid-cols-2 gap-2">
-              {[
-                { code: 'id', label: 'Indonesia' },
-                { code: 'en', label: 'English' },
-              ].map((l) => (
-                <button
-                  key={l.code}
-                  onClick={() => setLang(l.code)}
-                  className={`flex items-center justify-between rounded-xl border px-4 py-3 text-[13.5px] font-semibold transition-all duration-200 ${
-                    lang === l.code
-                      ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
-                      : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-slate-600'
-                  }`}
-                >
-                  {l.label}
-                  {lang === l.code && <Check className="h-4 w-4" strokeWidth={2.6} />}
-                </button>
-              ))}
-            </div>
+            <LanguageSwitch lang={lang} onChange={setLang} />
 
             {/* ---- Privacy ---- */}
             <SectionTitle icon={Shield} title="Privasi & Keamanan" />
@@ -184,7 +218,8 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               Kembalikan ke Bawaan
             </button>
 
-            <p className="mt-4 text-center text-[11px] font-medium text-slate-300 dark:text-slate-600">
+            {/* versi aplikasi: kontras dinaikkan agar terbaca di light & dark */}
+            <p className="mt-4 text-center text-[11px] font-medium text-slate-400 dark:text-slate-500">
               Boosteryuk v1.0.0
             </p>
           </div>

@@ -187,7 +187,7 @@ export default function AdminBroadcastPage() {
                     <img
                       src={image}
                       alt={imageName}
-                      className="h-14 w-20 rounded-lg border border-slate-200 object-cover"
+                      className="h-14 w-20 rounded-lg border border-slate-200 object-cover dark:border-slate-700"
                     />
                     <button
                       onClick={() => {
@@ -259,9 +259,9 @@ export default function AdminBroadcastPage() {
 
           <ul className="max-h-[300px] divide-y divide-slate-100 overflow-y-auto dark:divide-slate-700/50">
             {loading? (
-              <li className="p-5 text-center text-[13px] text-slate-400">Loading token...</li>
+              <li className="p-5 text-center text-[13px] text-slate-400 dark:text-slate-400">Loading token...</li>
             ) : tokens.length === 0? (
-              <li className="p-5 text-center text-[13px] text-slate-400">Belum ada device. Buka web dan izinkan notifikasi dulu.</li>
+              <li className="p-5 text-center text-[13px] text-slate-400 dark:text-slate-400">Belum ada device. Buka web dan izinkan notifikasi dulu.</li>
             ) : (
               tokens.map((r) => {
                 const checked =!!selected[r.token];

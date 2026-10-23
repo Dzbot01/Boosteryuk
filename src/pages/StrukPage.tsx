@@ -61,7 +61,8 @@ export default function StrukPage() {
 
   if (failed) {
     return (
-      <div className="mx-auto flex min-h-[calc(100vh-60px)] w-full max-w-md flex-col px-4 py-8 sm:px-6">
+      // page-align-left: di desktop kolom ini rata kiri sejajar header (lihat index.css)
+      <div className="page-align-left mx-auto flex min-h-[calc(100vh-60px)] w-full max-w-md flex-col px-4 py-8 sm:px-6">
         <Reveal>
           <button
             onClick={() => setFailed(null)}
@@ -79,7 +80,8 @@ export default function StrukPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
+    // page-align-left: di desktop kolom ini rata kiri sejajar header (lihat index.css)
+    <div className="page-align-left mx-auto max-w-3xl px-4 py-10 sm:px-6">
       <Reveal>
         <button
           onClick={() => navigate('/')}

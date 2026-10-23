@@ -92,7 +92,8 @@ export default function DepositInvoicePage() {
   };
 
   return (
-    <div className="mx-auto max-w-md px-4 pb-32 pt-8 sm:px-6">
+    // page-align-left: di desktop kolom ini rata kiri sejajar header (lihat index.css)
+    <div className="page-align-left mx-auto max-w-md px-4 pb-32 pt-8 sm:px-6">
       <Reveal>
         <button
           onClick={() => navigate(`/deposit/${method}`)}
@@ -111,7 +112,7 @@ export default function DepositInvoicePage() {
               <QrCode className="h-5 w-5" strokeWidth={2.2} />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="text-[10.5px] font-bold uppercase tracking-wider text-slate-400">
+              <p className="text-[10.5px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-400">
                 Invoice Deposit
               </p>
               <p className="font-display text-[15px] font-extrabold text-slate-900 dark:text-white">
@@ -140,7 +141,7 @@ export default function DepositInvoicePage() {
               <span className="absolute -right-1.5 -top-1.5 h-6 w-6 rounded-tr-lg border-r-[3px] border-t-[3px] border-cyan-500" />
               <span className="absolute -bottom-1.5 -left-1.5 h-6 w-6 rounded-bl-lg border-b-[3px] border-l-[3px] border-cyan-500" />
               <span className="absolute -bottom-1.5 -right-1.5 h-6 w-6 rounded-br-lg border-b-[3px] border-r-[3px] border-cyan-500" />
-              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white p-2 dark:border-slate-700">
+              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white p-2 dark:border-slate-700 dark:bg-slate-900">
                 <img src={QRIS_IMAGE} alt="QRIS" className="h-auto w-full rounded-md object-contain" />
                 {(expired || cancelled) && !paid && (
                   <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-slate-900/70 text-white backdrop-blur-sm">
@@ -154,7 +155,7 @@ export default function DepositInvoicePage() {
 
             {/* nominal */}
             <div className="mt-5 rounded-2xl bg-slate-50 p-4 text-center dark:bg-slate-900/40">
-              <p className="text-[10.5px] font-bold uppercase tracking-wider text-slate-400">
+              <p className="text-[10.5px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-400">
                 Harus Dibayar
               </p>
               <p className="mt-1 font-display text-[26px] font-extrabold leading-none text-slate-900 dark:text-white">
@@ -162,7 +163,7 @@ export default function DepositInvoicePage() {
               </p>
               <button
                 onClick={copyAmount}
-                className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-600 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-600 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-800"
               >
                 {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
                 {copied ? 'Tersalin' : 'Salin nominal'}

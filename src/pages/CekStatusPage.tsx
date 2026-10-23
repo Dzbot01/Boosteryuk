@@ -126,7 +126,8 @@ export default function CekStatusPage() {
   };
 
   return (
-    <main className="mx-auto max-w-4xl px-4 pb-32 pt-8 sm:px-6">
+    // page-align-left: di desktop kolom ini rata kiri sejajar header (lihat index.css)
+    <main className="page-align-left mx-auto max-w-4xl px-4 pb-32 pt-8 sm:px-6">
       <Reveal>
         <button
           onClick={() => navigate('/')}
@@ -315,7 +316,7 @@ export default function CekStatusPage() {
               <span>{captcha.a}</span>
               <span className="text-blue-600">+</span>
               <span>{captcha.b}</span>
-              <span className="text-slate-400">=</span>
+              <span className="text-slate-400 dark:text-slate-400">=</span>
               <span className="text-slate-300">?</span>
             </div>
 
@@ -338,7 +339,7 @@ export default function CekStatusPage() {
             <div className="mt-4 grid grid-cols-2 gap-2">
               <button
                 onClick={() => setCaptcha(null)}
-                className="h-11 rounded-xl border border-slate-200 bg-white text-[13px] font-bold text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                className="h-11 rounded-xl border border-slate-200 bg-white text-[13px] font-bold text-slate-700 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
               >
                 Batal
               </button>

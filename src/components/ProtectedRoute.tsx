@@ -9,10 +9,13 @@ export default function ProtectedRoute({
   children: React.ReactNode;
   adminOnly?: boolean;
 }) {
-  const { user, isAdmin } = useAuth();
+  const { user, isAdmin, loading } = useAuth();
   const location = useLocation();
   const pathname = location?.pathname || "/";
 
+  // Tunggu data auth selesai dimuat (AuthLoadingModal tampil) sebelum memutuskan redirect,
+  // agar refresh di halaman yang butuh login tidak terlempar ke beranda.
+  if (loading) return null;
   if (!user) {
     return <Navigate to="/" replace state={{ from: pathname }} />;
   }

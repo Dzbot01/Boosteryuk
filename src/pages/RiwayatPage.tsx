@@ -137,7 +137,8 @@ export default function RiwayatPage() {
 if(loading) return <div className="text-center py-20">Loading...</div>;
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
+    // page-align-left: di desktop kolom ini rata kiri sejajar header (lihat index.css)
+    <div className="page-align-left mx-auto max-w-3xl px-4 py-10 sm:px-6">
       <Reveal>
         <button
           onClick={() => navigate('/')}
@@ -174,7 +175,7 @@ if(loading) return <div className="text-center py-20">Loading...</div>;
       <Reveal delay={60}>
         <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center">
           <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-400" />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -190,7 +191,7 @@ if(loading) return <div className="text-center py-20">Loading...</div>;
                 className={`h-11 rounded-xl px-3.5 text-[12.5px] font-bold transition-all active:scale-95 ${
                   filter === f.id
                    ? 'bg-cyan-600 text-white shadow-md shadow-cyan-600/25'
-                    : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                    : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-800'
                 }`}
               >
                 {f.label}

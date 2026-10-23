@@ -39,8 +39,8 @@ export interface OrderDetail {
 function LineItem({ price, label }: { price: string; label: string }) {
   return (
     <div className="min-w-0 text-left">
-      <p className="text-[12px] font-extrabold leading-none text-slate-900 tabular-nums">{price}</p>
-      <p className="mt-0.5 truncate text-[10px] font-medium leading-tight text-slate-500">{label}</p>
+      <p className="text-[12px] font-extrabold leading-none text-slate-900 tabular-nums dark:text-white">{price}</p>
+      <p className="mt-0.5 truncate text-[10px] font-medium leading-tight text-slate-500 dark:text-slate-400">{label}</p>
     </div>
   );
 }
@@ -167,7 +167,7 @@ export default function OrderDetailSheet({
     <div className="pointer-events-none fixed inset-x-0 bottom-0 z-50 sm:px-2">
       {/* Panel utama — satu kotak persegi panjang full-width */}
       <div
-        className="pointer-events-auto w-full border-t border-slate-200 bg-white/95 backdrop-blur-xl shadow-[0_-12px_40px_-12px_rgba(15,23,42,0.28)] transition-[transform,border-radius] duration-300 ease-out"
+        className="pointer-events-auto w-full border-t border-slate-200 bg-white/95 backdrop-blur-xl shadow-[0_-12px_40px_-12px_rgba(15,23,42,0.28)] transition-[transform,border-radius] duration-300 ease-out dark:bg-slate-900/95 dark:border-slate-700"
         style={{
           transform: dragOffset !== 0 ? (open ? `translateY(${dragOffset}px)` : `translateY(calc(100% - 22px + ${dragOffset}px))`) : translate,
           borderTopLeftRadius: open ? '20px' : '14px',
@@ -186,7 +186,7 @@ export default function OrderDetailSheet({
           onTouchStart={onTouchStart}
           onTouchMove={onTouchMove}
           onTouchEnd={onTouchEnd}
-          className={`flex ${open ? 'h-8' : 'h-[22px]'} w-full cursor-grab touch-none items-center justify-center border-b border-slate-100 transition-[height] duration-300 active:cursor-grabbing`}
+          className={`flex ${open ? 'h-8' : 'h-[22px]'} w-full cursor-grab touch-none items-center justify-center border-b border-slate-100 transition-[height] duration-300 active:cursor-grabbing dark:border-slate-800`}
           role="separator"
           aria-label={open ? 'Tarik ke bawah untuk menutup' : 'Tarik ke atas untuk membuka'}
         >
@@ -194,7 +194,7 @@ export default function OrderDetailSheet({
           <span className="flex flex-col items-center gap-0.5">
             <span className="block h-1 w-10 rounded-full bg-slate-300" />
             {!open ? (
-              <span className="inline-flex items-center gap-1 text-[9px] font-extrabold uppercase tracking-[0.18em] text-slate-400">
+              <span className="inline-flex items-center gap-1 text-[9px] font-extrabold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-400">
                 <GripHorizontal className="h-3 w-3" strokeWidth={2.6} />
                 Tarik ke atas untuk buka
               </span>
@@ -207,16 +207,16 @@ export default function OrderDetailSheet({
           {/* header (judul order) */}
           <div className="mb-2 min-w-0 text-left">
             <p className="text-[9.5px] font-extrabold uppercase tracking-[0.2em] text-cyan-600">Detail Order</p>
-            <p className="truncate text-[12.5px] font-extrabold leading-tight text-slate-900">
+            <p className="truncate text-[12.5px] font-extrabold leading-tight text-slate-900 dark:text-white">
               {serverName || plan.name}
-              <span className="ml-1.5 font-medium text-slate-400">
+              <span className="ml-1.5 font-medium text-slate-400 dark:text-slate-400">
                 {plan.family} · {region ? `${region.city}, ${region.country}` : 'Region belum dipilih'}
               </span>
             </p>
           </div>
 
           {/* Baris utama persegi panjang: line items rata kiri + qty + total + CTA */}
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 sm:flex-nowrap">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 sm:flex-nowrap dark:bg-slate-900 dark:border-slate-700">
             {/* Line items — detail kecil rata kiri */}
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-6 gap-y-2">
               <LineItem price={euro(plan.monthly)} label={`${plan.name} x${quantity}`} />
@@ -230,18 +230,18 @@ export default function OrderDetailSheet({
 
             {/* Quantity stepper (plus/minus) */}
             <div className="flex shrink-0 items-center gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Qty</span>
-              <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1">
+              <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400 dark:text-slate-400">Qty</span>
+              <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 dark:bg-slate-800/60 dark:border-slate-700">
                 <button
                   type="button"
                   aria-label="Kurangi jumlah order"
                   disabled={quantity <= 1}
                   onClick={() => onQuantityChange(Math.max(1, quantity - 1))}
-                  className="flex h-7 w-7 items-center justify-center rounded-md bg-white text-slate-700 shadow-sm transition-all hover:bg-slate-100 active:scale-90 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="flex h-7 w-7 items-center justify-center rounded-md bg-white text-slate-700 shadow-sm transition-all hover:bg-slate-100 active:scale-90 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-200 dark:bg-slate-900 dark:hover:bg-slate-800"
                 >
                   <Minus className="h-3.5 w-3.5" strokeWidth={3} />
                 </button>
-                <span className="w-7 text-center text-[12.5px] font-extrabold tabular-nums text-slate-900">{quantity}</span>
+                <span className="w-7 text-center text-[12.5px] font-extrabold tabular-nums text-slate-900 dark:text-white">{quantity}</span>
                 <button
                   type="button"
                   aria-label="Tambah jumlah order"
@@ -255,9 +255,9 @@ export default function OrderDetailSheet({
             </div>
 
             {/* Total harga */}
-            <div className="shrink-0 border-slate-200 pl-0 text-left sm:border-l sm:pl-5">
-              <p className="text-[14px] font-extrabold leading-none text-slate-900 tabular-nums">{euro(total)}/month</p>
-              <p className="mt-0.5 text-[10px] font-medium text-slate-500">€{hourly.toFixed(4)}/hour</p>
+            <div className="shrink-0 border-slate-200 pl-0 text-left sm:border-l sm:pl-5 dark:border-slate-700">
+              <p className="text-[14px] font-extrabold leading-none text-slate-900 tabular-nums dark:text-white">{euro(total)}/month</p>
+              <p className="mt-0.5 text-[10px] font-medium text-slate-500 dark:text-slate-400">€{hourly.toFixed(4)}/hour</p>
             </div>
 
             {/* CTA order */}
@@ -288,7 +288,7 @@ export default function OrderDetailSheet({
               {done}
             </p>
           ) : (
-            <p className="mt-2 text-left text-[9.5px] font-medium text-slate-400">
+            <p className="mt-2 text-left text-[9.5px] font-medium text-slate-400 dark:text-slate-400">
               Tarik strip di atas ke bawah untuk menutup · Ditagih per jam · tanpa biaya setup
             </p>
           )}

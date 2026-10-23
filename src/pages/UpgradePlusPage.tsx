@@ -73,7 +73,8 @@ export default function UpgradePlusPage() {
   };
 
   return (
-    <div className="mx-auto max-w-lg px-4 pb-32 pt-8 sm:px-6">
+    // page-align-left: di desktop kolom ini rata kiri sejajar header (lihat index.css)
+    <div className="page-align-left mx-auto max-w-lg px-4 pb-32 pt-8 sm:px-6">
       {success && <LogoRain />}
       <Reveal>
         <button

@@ -14,6 +14,7 @@ export default function StrukCard({ struk }: { struk: Struk }) {
   return (
     <div
       id="struk-print"
+      // Struk sengaja tetap "kertas putih" di tema dark (untuk cetak/PDF), jadi tanpa varian dark:.
       className="relative w-full overflow-hidden rounded-lg bg-white text-slate-900 shadow-[0_24px_60px_-24px_rgba(15,23,42,0.35)]"
     >
       <div className="pointer-events-none absolute inset-0 overflow-hidden opacity-[0.25] mix-blend-multiply">

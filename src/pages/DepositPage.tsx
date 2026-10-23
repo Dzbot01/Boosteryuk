@@ -47,7 +47,8 @@ export default function DepositPage() {
   }, {} as Record<string, TripayChannel[]>);
 
   return (
-    <div className="mx-auto max-w-2xl px-4 pb-32 pt-8 sm:px-6">
+    // page-align-left: di desktop kolom ini rata kiri sejajar header (lihat index.css)
+    <div className="page-align-left mx-auto max-w-2xl px-4 pb-32 pt-8 sm:px-6">
       <Reveal>
         <button
           onClick={() => navigate('/')}
@@ -66,7 +67,7 @@ export default function DepositPage() {
 
       <Reveal delay={60}>
         <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-700/60 dark:bg-slate-800/70">
-          <label className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Nominal Deposit</label>
+          <label className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Nominal Deposit</label>
           <div className="mt-2 flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400">
               <Wallet className="h-5 w-5" />
@@ -103,7 +104,7 @@ export default function DepositPage() {
         <div className="mt-5 space-y-6">
           {Object.entries(grouped).map(([group, list], gi) => (
             <div key={group}>
-              <p className="mb-2 text-[11px] font-bold uppercase tracking-widest text-slate-400">{group}</p>
+              <p className="mb-2 text-[11px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-400">{group}</p>
               <div className="space-y-3">
                 {list.map((ch, i) => (
                   <Reveal key={ch.code} delay={90 + i * 30}>
@@ -120,7 +121,7 @@ export default function DepositPage() {
                           Fee: Rp {ch.total_fee.flat!== '0'? ch.total_fee.flat : `${ch.total_fee.percent}%`} · Min. Rp {ch.minimum_fee.toLocaleString('id-ID')}
                         </p>
                       </div>
-                      <ChevronRight className="h-5 w-5 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />
+                      <ChevronRight className="h-5 w-5 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5 dark:text-slate-400" />
                     </button>
                   </Reveal>
                 ))}

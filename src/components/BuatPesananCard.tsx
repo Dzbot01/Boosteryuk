@@ -49,13 +49,15 @@ function BrandBadge({ name }: { name: string }) {
 }
 
 
+// Warna memakai CSS variable (lihat --by-* di index.css) agar ikut berubah di tema dark;
+// sebelumnya hex statis sehingga card tetap putih & teks gelap saat dark mode.
 const COLOR = {
-  primary: '#48C6E5',
-  dark: '#172033',
-  secondary: '#667085',
-  border: '#E5E7EB',
-  surface: '#FFFFFF',
-  muted: '#FBFCFD',
+  primary: 'var(--by-primary)',
+  dark: 'var(--by-ink)',
+  secondary: 'var(--by-ink-2)',
+  border: 'var(--by-line)',
+  surface: 'var(--by-surface)',
+  muted: 'var(--by-muted)',
 };
 
 interface Option { value: string; label: string }
@@ -190,7 +192,7 @@ function CustomSelect({
           {showBrand && selected && <BrandBadge name={selected.label} />}
           <span
             className={`min-w-0 flex-1 ${wrapText && selected ? 'whitespace-normal break-words text-[13px] leading-snug' : 'truncate'}`}
-            style={{ color: selected ? COLOR.dark : '#98A2B3' }}
+            style={{ color: selected ? COLOR.dark : 'var(--by-placeholder)' }}
           >
             {selected?.label || placeholder}
           </span>
@@ -227,7 +229,7 @@ function CustomSelect({
             }`}
           >
             {visible.length === 0 ? (
-              <p className="px-3.5 py-6 text-center text-[12.5px]" style={{ color: '#98A2B3' }}>Tidak ada hasil</p>
+              <p className="px-3.5 py-6 text-center text-[12.5px]" style={{ color: 'var(--by-placeholder)' }}>Tidak ada hasil</p>
             ) : visible.map((option) => {
               const active = option.value === value;
               return (
@@ -240,7 +242,7 @@ function CustomSelect({
                   className={`flex w-full ${wrapText ? 'min-h-[44px] py-2.5 sm:py-3 items-start' : 'h-11 items-center'} gap-2.5 border-b px-3.5 text-left last:border-b-0 hover:bg-cyan-50 dark:border-slate-700 dark:hover:bg-slate-800 transition-colors ${
                     widePanel ? 'w-max min-w-full whitespace-nowrap' : ''
                   }`}
-                  style={{ borderColor: COLOR.border, background: active ? '#F0F9FD' : undefined }}
+                  style={{ borderColor: COLOR.border, background: active ? 'var(--by-active)' : undefined }}
                 >
                   {showBrand && <BrandBadge name={option.label} />}
                   <span
@@ -422,7 +424,8 @@ if(!tokenFromStorage) {
         ordering={ordering}
         orderNotice={orderNotice}
       />
-    <div className="mx-auto w-full max-w-[360px] rounded-[18px] px-4 py-5 sm:px-5" style={{ background: COLOR.surface, boxShadow: '0 10px 30px -14px rgba(23,32,51,.16)' }}>
+    {/* Desktop (lg): card rata kiri (lg:mx-0) & sedikit lebih lebar; mobile tetap di tengah. */}
+    <div className="mx-auto w-full max-w-[360px] rounded-[18px] px-4 py-5 sm:px-5 lg:mx-0 lg:max-w-[440px]" style={{ background: COLOR.surface, boxShadow: '0 10px 30px -14px rgba(23,32,51,.16)' }}>
       {/* Header */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
@@ -563,7 +566,7 @@ if(!tokenFromStorage) {
                   })}
                 </div>
               ) : (
-                <p className="mt-1 text-slate-500">-</p>
+                <p className="mt-1 text-slate-500 dark:text-slate-400">-</p>
               )}
 
               {description?.catatan && description.catatan.length > 0 && (
@@ -590,7 +593,7 @@ if(!tokenFromStorage) {
           ) : (
             <div
               className="flex min-h-[90px] w-full items-center justify-center rounded-xl border p-3.5 text-[12.5px]"
-              style={{ borderColor: COLOR.border, color: '#98A2B3', background: COLOR.muted }}
+              style={{ borderColor: COLOR.border, color: 'var(--by-placeholder)', background: COLOR.muted }}
             >
               {loading ? 'Memuat layanan…' : 'Pilih layanan untuk melihat deskripsi'}
             </div>
@@ -635,7 +638,7 @@ if(!tokenFromStorage) {
               className="flex h-11 w-full items-center rounded-xl border bg-slate-50 px-3.5 font-mono text-[13.5px] text-slate-600 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
               style={{ borderColor: COLOR.border }}
             >
-              {commentLines.length} <span className="ml-1 text-slate-400">(otomatis dari baris komentar)</span>
+              {commentLines.length} <span className="ml-1 text-slate-400 dark:text-slate-400">(otomatis dari baris komentar)</span>
             </div>
           ) : (
             <>
@@ -663,7 +666,7 @@ if(!tokenFromStorage) {
         <FormSection label="Harga">
           <div
             className="rounded-xl border-2 p-3.5"
-            style={{ borderColor: COLOR.primary, background: '#F0F9FD' }}
+            style={{ borderColor: COLOR.primary, background: 'var(--by-active)' }}
           >
             <p className="font-display text-[22px] font-extrabold" style={{ color: COLOR.primary }}>
               {formatRupiah(price)}
@@ -724,8 +727,8 @@ if(!tokenFromStorage) {
             aria-live="polite"
             className={`flex items-start gap-2 rounded-xl border px-3 py-3 text-[12px] leading-relaxed ${
               orderNotice.ok
-                ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                : 'border-rose-200 bg-rose-50 text-rose-700'
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:border-emerald-800/60'
+                : 'border-rose-200 bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:border-rose-800/60'
             }`}
           >
             {orderNotice.ok ? (

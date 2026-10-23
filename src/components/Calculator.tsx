@@ -162,10 +162,10 @@ export default function Calculator() {
             <button onClick={backspace} className={`${btn} bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300`}>
               ⌫
             </button>
-            <button onClick={() => applyOp('÷')} className={`${btn} bg-cyan-50 text-cyan-700 hover:bg-cyan-100 dark:bg-cyan-900/25 dark:text-cyan-400 font-bold`}>
+            <button onClick={() => applyOp('÷')} className={`${btn} bg-cyan-50 text-cyan-700 hover:bg-cyan-100 dark:bg-cyan-900/25 dark:text-cyan-400 font-bold dark:hover:bg-cyan-900/40`}>
               ÷
             </button>
-            <button onClick={() => applyOp('×')} className={`${btn} bg-cyan-50 text-cyan-700 hover:bg-cyan-100 dark:bg-cyan-900/25 dark:text-cyan-400 font-bold`}>
+            <button onClick={() => applyOp('×')} className={`${btn} bg-cyan-50 text-cyan-700 hover:bg-cyan-100 dark:bg-cyan-900/25 dark:text-cyan-400 font-bold dark:hover:bg-cyan-900/40`}>
               ×
             </button>
 
@@ -174,7 +174,7 @@ export default function Calculator() {
                 {d}
               </button>
             ))}
-            <button onClick={() => applyOp('-')} className={`${btn} bg-cyan-50 text-cyan-700 hover:bg-cyan-100 dark:bg-cyan-900/25 dark:text-cyan-400 font-bold`}>
+            <button onClick={() => applyOp('-')} className={`${btn} bg-cyan-50 text-cyan-700 hover:bg-cyan-100 dark:bg-cyan-900/25 dark:text-cyan-400 font-bold dark:hover:bg-cyan-900/40`}>
               −
             </button>
 
@@ -183,7 +183,7 @@ export default function Calculator() {
                 {d}
               </button>
             ))}
-            <button onClick={() => applyOp('+')} className={`${btn} bg-cyan-50 text-cyan-700 hover:bg-cyan-100 dark:bg-cyan-900/25 dark:text-cyan-400 font-bold`}>
+            <button onClick={() => applyOp('+')} className={`${btn} bg-cyan-50 text-cyan-700 hover:bg-cyan-100 dark:bg-cyan-900/25 dark:text-cyan-400 font-bold dark:hover:bg-cyan-900/40`}>
               +
             </button>
 

@@ -14,13 +14,15 @@ import {
 import { IP_OPTIONS, NETWORK_PLANS, PLAN_FAMILIES, type PlanFamily } from '../data/serverData';
 import { useVpsCatalog, type VpsCatalogState } from '../services/vpsApi';
 
+// Warna memakai CSS variable (lihat --by-* di index.css) agar ikut berubah di tema dark;
+// sebelumnya hex statis sehingga card tetap putih & teks gelap saat dark mode.
 const COLOR = {
-  primary: '#48C6E5',
-  dark: '#172033',
-  secondary: '#667085',
-  border: '#E5E7EB',
-  surface: '#FFFFFF',
-  muted: '#F8FAFC',
+  primary: 'var(--by-primary)',
+  dark: 'var(--by-ink)',
+  secondary: 'var(--by-ink-2)',
+  border: 'var(--by-line)',
+  surface: 'var(--by-surface)',
+  muted: 'var(--by-muted)',
 };
 
 const SLIDE_INTERVAL = 4500;
@@ -64,7 +66,7 @@ function SkeletonCards({ count, width }: { count: number; width: number }) {
       {Array.from({ length: count }, (_, i) => (
         <div
           key={i}
-          className="aspect-square shrink-0 animate-pulse rounded-2xl border border-slate-200 bg-slate-100"
+          className="aspect-square shrink-0 animate-pulse rounded-2xl border border-slate-200 bg-slate-100 dark:bg-slate-800 dark:border-slate-700"
           style={{ width }}
         />
       ))}
@@ -76,7 +78,7 @@ function SkeletonCards({ count, width }: { count: number; width: number }) {
 function CatalogStatus({ catalog }: { catalog: VpsCatalogState }) {
   if (catalog.status === 'loading') {
     return (
-      <p className="flex items-center gap-2 rounded-xl bg-slate-50 px-3.5 py-2.5 text-[11.5px] font-medium text-slate-500">
+      <p className="flex items-center gap-2 rounded-xl bg-slate-50 px-3.5 py-2.5 text-[11.5px] font-medium text-slate-500 dark:text-slate-400 dark:bg-slate-800/60">
         <RefreshCw className="h-3.5 w-3.5 animate-spin text-cyan-500" strokeWidth={2.4} />
         Memuat paket, image &amp; region dari HostVDS…
       </p>
@@ -84,7 +86,7 @@ function CatalogStatus({ catalog }: { catalog: VpsCatalogState }) {
   }
   if (catalog.status === 'fallback') {
     return (
-      <div className="flex items-start justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5">
+      <div className="flex items-start justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 dark:bg-amber-950/40 dark:border-amber-800/60">
         <p className="flex items-start gap-2 text-[11.5px] font-medium text-amber-700">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" strokeWidth={2.4} />
           <span>
@@ -95,7 +97,7 @@ function CatalogStatus({ catalog }: { catalog: VpsCatalogState }) {
         <button
           type="button"
           onClick={catalog.reload}
-          className="shrink-0 rounded-lg bg-white px-2.5 py-1 text-[11px] font-bold text-amber-700 ring-1 ring-amber-200 transition-all hover:bg-amber-100 active:scale-95"
+          className="shrink-0 rounded-lg bg-white px-2.5 py-1 text-[11px] font-bold text-amber-700 ring-1 ring-amber-200 transition-all hover:bg-amber-100 active:scale-95 dark:bg-slate-900"
         >
           Coba lagi
         </button>
@@ -103,7 +105,7 @@ function CatalogStatus({ catalog }: { catalog: VpsCatalogState }) {
     );
   }
   return (
-    <p className="flex items-center gap-2 text-[11px] font-medium text-slate-400">
+    <p className="flex items-center gap-2 text-[11px] font-medium text-slate-400 dark:text-slate-400">
       <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse-dot" />
       Live dari HostVDS
       {catalog.generatedAt ? ` · diperbarui ${new Date(catalog.generatedAt).toLocaleTimeString('id-ID')}` : ''}
@@ -155,12 +157,12 @@ function CustomSelect({
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
-        className={`flex h-11 w-full items-center justify-between gap-2 rounded-xl border bg-white pl-3.5 pr-3 text-left text-[13.5px] outline-none transition-colors focus-visible:ring-4 focus-visible:ring-cyan-500/10 ${
+        className={`flex h-11 w-full items-center justify-between gap-2 rounded-xl border bg-white pl-3.5 pr-3 text-left text-[13.5px] outline-none transition-colors focus-visible:ring-4 focus-visible:ring-cyan-500/10 dark:bg-slate-900 ${
           disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
         }`}
         style={{ borderColor: COLOR.border }}
       >
-        <span className="min-w-0 flex-1 truncate" style={{ color: selected ? COLOR.dark : '#98A2B3' }}>
+        <span className="min-w-0 flex-1 truncate" style={{ color: selected ? COLOR.dark : 'var(--by-placeholder)' }}>
           {selected?.label || placeholder}
         </span>
         <ChevronDown
@@ -172,7 +174,7 @@ function CustomSelect({
 
       {open && (
         <div
-          className="absolute left-0 right-0 top-full z-40 mt-1 overflow-hidden rounded-xl border bg-white shadow-[0_8px_24px_-8px_rgba(23,32,51,0.18)]"
+          className="absolute left-0 right-0 top-full z-40 mt-1 overflow-hidden rounded-xl border bg-white shadow-[0_8px_24px_-8px_rgba(23,32,51,0.18)] dark:bg-slate-900"
           style={{ borderColor: COLOR.border }}
           role="listbox"
         >
@@ -188,8 +190,8 @@ function CustomSelect({
                   onChange(option.value);
                   setOpen(false);
                 }}
-                className="flex h-11 w-full items-center gap-2.5 border-b px-3.5 text-left text-[13.5px] last:border-b-0 transition-colors hover:bg-cyan-50"
-                style={{ borderColor: COLOR.border, background: active ? '#F0F9FD' : undefined, color: active ? COLOR.primary : COLOR.dark }}
+                className="flex h-11 w-full items-center gap-2.5 border-b px-3.5 text-left text-[13.5px] last:border-b-0 transition-colors hover:bg-cyan-50 dark:hover:bg-cyan-950/60"
+                style={{ borderColor: COLOR.border, background: active ? 'var(--by-active)' : undefined, color: active ? COLOR.primary : COLOR.dark }}
               >
                 {option.label}
               </button>
@@ -282,10 +284,11 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#f0f9ff,_#ffffff_42%,_#f8fafc_100%)] pb-40 text-slate-900">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_#f0f9ff,_#ffffff_42%,_#f8fafc_100%)] pb-40 text-slate-900 dark:bg-none dark:text-slate-100">
+      {/* dark:bg-none + dark:text-*: gradien terang dimatikan di tema dark agar teks tidak tenggelam */}
       <div className="mx-auto max-w-6xl px-4 pt-8 sm:px-6">
         <Reveal>
-          <button className="mb-6 inline-flex items-center gap-2 rounded-xl px-3 py-2 text-[13.5px] font-semibold text-slate-500 transition-all hover:bg-slate-100 hover:text-slate-900 active:scale-95">
+          <button className="mb-6 inline-flex items-center gap-2 rounded-xl px-3 py-2 text-[13.5px] font-semibold text-slate-500 transition-all hover:bg-slate-100 hover:text-slate-900 active:scale-95 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white">
             <ArrowLeft className="h-4 w-4" strokeWidth={2.4} />
             Kembali
           </button>
@@ -297,10 +300,10 @@ export default function App() {
               <Sparkles className="h-3 w-3" strokeWidth={2.6} />
               Provisioning
             </p>
-            <h1 className="text-3xl font-black tracking-tight text-slate-900 sm:text-4xl">
+            <h1 className="text-3xl font-black tracking-tight text-slate-900 sm:text-4xl dark:text-white">
               Bangun server baru dalam hitungan detik
             </h1>
-            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-600 sm:text-[15px]">
+            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-600 sm:text-[15px] dark:text-slate-300">
               Pilih plan, lokasi, network plan, image, dan konfigurasi jaringan. Semua kartu di bawah bisa
               digeser langsung ke kiri dan kanan.
             </p>
@@ -308,9 +311,10 @@ export default function App() {
         </Reveal>
 
       {/* ================= SLIDER ================= */}
+      {/* lg:!aspect-[3/1]: di desktop slider dibuat lebih pendek agar tidak mendominasi halaman */}
       <Reveal delay={40}>
         <div
-          className="relative aspect-[16/9] w-full overflow-hidden rounded-[28px] border border-slate-200 shadow-[0_24px_60px_-30px_rgba(15,23,42,0.5)] dark:border-slate-700/60 sm:aspect-[21/9]"
+          className="relative aspect-[16/9] w-full overflow-hidden rounded-[28px] lg:!aspect-[3/1] border border-slate-200 shadow-[0_24px_60px_-30px_rgba(15,23,42,0.5)] dark:border-slate-700/60 sm:aspect-[21/9]"
           onMouseEnter={() => (paused.current = true)}
           onMouseLeave={() => (paused.current = false)}
         >
@@ -346,7 +350,7 @@ export default function App() {
                 onClick={() => setSlideIndex(i)}
                 aria-label={`Slide ${i + 1}`}
                 className={`h-1.5 rounded-full transition-all duration-300 ${
-                  i === slideIndex ? 'w-6 bg-white' : 'w-1.5 bg-white/50 hover:bg-white/80'
+                  i === slideIndex ? 'w-6 bg-white' : 'w-1.5 bg-white/50 hover:bg-white/80' /* titik slider tetap putih di atas foto, juga di tema dark */
                 }`}
               />
             ))}
@@ -492,7 +496,7 @@ export default function App() {
                 />
 
                 {/* Tab segment Operating Systems / Applications */}
-                <div className="mb-3 inline-flex rounded-xl bg-slate-100 p-1">
+                <div className="mb-3 inline-flex rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
                   {(
                     [
                       { id: 'os', label: 'Operating Systems' },
@@ -507,7 +511,7 @@ export default function App() {
                         setImageId(null);
                       }}
                       className={`rounded-lg px-3.5 py-2 text-[12px] font-bold transition-all active:scale-95 ${
-                        imageTab === tab.id ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                        imageTab === tab.id ? 'bg-white text-slate-900 shadow-sm dark:text-white dark:bg-slate-900' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
                       }`}
                     >
                       {tab.label}
@@ -519,7 +523,7 @@ export default function App() {
                 <DragScroller hint="Geser untuk melihat semua image">
                   {loading ? <SkeletonCards count={6} width={132} /> : null}
                   {!loading && !images.length ? (
-                    <p className="py-6 text-[12px] font-medium text-slate-400">Belum ada image untuk kategori ini.</p>
+                    <p className="py-6 text-[12px] font-medium text-slate-400 dark:text-slate-400">Belum ada image untuk kategori ini.</p>
                   ) : null}
                   {images.map((item) => (
                     <ImageTile
@@ -539,10 +543,10 @@ export default function App() {
                   {image ? (
                     <>
                       <div className="mb-2 flex items-center justify-between gap-2">
-                        <p className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-slate-500">
+                        <p className="text-[11px] font-extrabold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
                           Swap versi · {image.name}
                         </p>
-                        <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-bold text-cyan-600 ring-1 ring-cyan-100">
+                        <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-bold text-cyan-600 ring-1 ring-cyan-100 dark:bg-slate-900">
                           default: {image.versions[0]}
                         </span>
                       </div>
@@ -558,7 +562,7 @@ export default function App() {
                       </div>
                     </>
                   ) : (
-                    <p className="py-1 text-center text-[12px] font-medium text-slate-400">
+                    <p className="py-1 text-center text-[12px] font-medium text-slate-400 dark:text-slate-400">
                       Klik salah satu image untuk memilih versi
                     </p>
                   )}
@@ -571,7 +575,7 @@ export default function App() {
               <FormSection step="06" title="Configuration" hint="Identitas server dan tipe IP address">
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div>
-                    <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                    <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                       Nama server
                     </label>
                     <div className="relative">
@@ -580,18 +584,18 @@ export default function App() {
                         value={serverName}
                         onChange={(event) => setServerName(event.target.value)}
                         placeholder="server-produksi-01"
-                        className="h-11 w-full rounded-xl border bg-white pl-9 pr-3 text-[13.5px] outline-none transition-colors focus:border-cyan-400 focus:ring-4 focus:ring-cyan-500/10"
+                        className="h-11 w-full rounded-xl border bg-white pl-9 pr-3 text-[13.5px] outline-none transition-colors focus:border-cyan-400 focus:ring-4 focus:ring-cyan-500/10 dark:bg-slate-900"
                         style={{ borderColor: COLOR.border }}
                       />
                     </div>
-                    <p className="mt-1 text-[10px] font-medium text-slate-400">
+                    <p className="mt-1 text-[10px] font-medium text-slate-400 dark:text-slate-400">
                       Biarkan kosong untuk memakai nama paket otomatis
                     </p>
                   </div>
 
                   {/* Segmented button IP Address */}
                   <div>
-                    <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                    <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                       IP Address
                     </label>
                     <div className="grid grid-cols-3 gap-2">
@@ -604,8 +608,8 @@ export default function App() {
                             onClick={() => setIpId(option.id)}
                             className={`h-11 rounded-xl border text-[12px] font-bold transition-all active:scale-95 ${
                               active
-                                ? 'border-cyan-400 bg-cyan-50 text-cyan-700 shadow-[0_10px_24px_-16px_rgba(72,198,229,1)]'
-                                : 'border-slate-200 bg-white text-slate-600 hover:border-cyan-200'
+                                ? 'border-cyan-400 bg-cyan-50 text-cyan-700 shadow-[0_10px_24px_-16px_rgba(72,198,229,1)] dark:bg-cyan-950/40'
+                                : 'border-slate-200 bg-white text-slate-600 hover:border-cyan-200 dark:text-slate-300 dark:bg-slate-900 dark:border-slate-700'
                             }`}
                           >
                             {option.label}
@@ -613,14 +617,14 @@ export default function App() {
                         );
                       })}
                     </div>
-                    <p className="mt-1 text-[10px] font-medium text-slate-400">{ipOption.desc} · included</p>
+                    <p className="mt-1 text-[10px] font-medium text-slate-400 dark:text-slate-400">{ipOption.desc} · included</p>
                   </div>
                 </div>
               </FormSection>
 
               {/* Info bantuan jika belum memilih paket — bukan card biru total. */}
               {!plan ? (
-                <p className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-[11.5px] font-medium text-slate-500">
+                <p className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-[11.5px] font-medium text-slate-500 dark:text-slate-400 dark:bg-slate-800/60 dark:border-slate-600">
                   Pilih paket server di langkah 02 — panel order di bawah layar bisa ditarik ke atas untuk membuka detail.
                 </p>
               ) : null}
