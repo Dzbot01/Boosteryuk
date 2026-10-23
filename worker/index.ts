@@ -133,7 +133,88 @@ export default {
           headers: { ...cors, "Content-Type": "application/json" }
         });
       }
+// POST /api/resend/send
+if (url.pathname === "/api/resend/send") {
+  if (request.method !== "POST") {
+    return new Response(JSON.stringify({ ok: false, error: "Method not allowed" }), {
+      status: 405,
+      headers: { ...cors, "Content-Type": "application/json" }
+    });
+  }
 
+  const suppliedToken = request.headers.get("X-Endpoint-Token") || "";
+
+  if (
+    !env.RESEND_ENDPOINT_TOKEN ||
+    suppliedToken !== String(env.RESEND_ENDPOINT_TOKEN)
+  ) {
+    return new Response(JSON.stringify({ ok: false, error: "Unauthorized" }), {
+      status: 401,
+      headers: { ...cors, "Content-Type": "application/json" }
+    });
+  }
+
+  if (!env.RESEND_KEY) {
+    return new Response(JSON.stringify({ ok: false, error: "RESEND_KEY is not configured" }), {
+      status: 500,
+      headers: { ...cors, "Content-Type": "application/json" }
+    });
+  }
+
+  const body: any = await request.json();
+
+  if (!body.from || !body.to || !body.subject || (!body.html && !body.text)) {
+    return new Response(
+      JSON.stringify({
+        ok: false,
+        error: "Required fields: from, to, subject, and html or text"
+      }),
+      {
+        status: 400,
+        headers: { ...cors, "Content-Type": "application/json" }
+      }
+    );
+  }
+
+  const resendResponse = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${String(env.RESEND_KEY).trim()}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      from: body.from,
+      to: body.to,
+      subject: body.subject,
+      ...(body.html ? { html: body.html } : {}),
+      ...(body.text ? { text: body.text } : {})
+    })
+  });
+
+  const resendData: any = await resendResponse.json();
+
+  if (!resendResponse.ok) {
+    return new Response(
+      JSON.stringify({ ok: false, error: resendData }),
+      {
+        status: resendResponse.status,
+        headers: { ...cors, "Content-Type": "application/json" }
+      }
+    );
+  }
+
+  return new Response(
+    JSON.stringify({ ok: true, id: resendData.id }),
+    {
+      status: 200,
+      headers: {
+        ...cors,
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store"
+      }
+    }
+  );
+}
       // 4. CALLBACK - FORWARD TO AEONFREE
       if (url.pathname.includes("/callback")) {
         const bodyText = await request.text();
