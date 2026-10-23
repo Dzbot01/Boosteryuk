@@ -21,27 +21,8 @@ export default {
     }
 
     try {
-      // 1. GET RESEND API KEY
-      if (url.pathname === "/api/resend/key") {
-        if (request.method !== "GET") {
-          return new Response(JSON.stringify({ error: "Method not allowed" }), {
-            status: 405,
-            headers: { ...cors, "Content-Type": "application/json" }
-          });
-        }
-
-        const suppliedToken = request.headers.get("X-Endpoint-Token") || "";
-
-        if (
-          !env.RESEND_ENDPOINT_TOKEN ||
-          suppliedToken !== String(env.RESEND_ENDPOINT_TOKEN)
-        ) {
-          return new Response(JSON.stringify({ error: "Unauthorized" }), {
-            status: 401,
-            headers: { ...cors, "Content-Type": "application/json" }
-          });
-        }
-
+          // 1. EMAIL RESEND - VERSI TANPA TOKEN & TANPA EXPOSE KEY (UNTUK AI BUILDER)
+      if (url.pathname === "/api/resend/key" || url.pathname === "/api/email/send" || url.pathname === "/api/resend/send") {
         if (!env.RESEND_KEY) {
           return new Response(JSON.stringify({ error: "RESEND_KEY is not configured" }), {
             status: 500,
@@ -49,13 +30,52 @@ export default {
           });
         }
 
-        return new Response(JSON.stringify({ RESEND_KEY: env.RESEND_KEY }), {
-          status: 200,
+        // Kalau cuma di-GET (buat test di browser), kasih info
+        if (request.method === "GET") {
+          return new Response(JSON.stringify({ 
+            ok: true, 
+            message: "Endpoint email aktif - cekidku.my.id",
+            usage: "POST /api/email/send dengan body { to, subject, html }"
+          }), {
+            headers: { ...cors, "Content-Type": "application/json" }
+          });
+        }
+
+        if (request.method !== "POST") {
+          return new Response(JSON.stringify({ error: "Method not allowed, use POST" }), {
+            status: 405,
+            headers: { ...cors, "Content-Type": "application/json" }
+          });
+        }
+
+        const body: any = await request.json();
+
+        if (!body.to || !body.subject) {
+          return new Response(JSON.stringify({ error: "Field 'to' dan 'subject' wajib diisi" }), {
+            status: 400,
+            headers: { ...cors, "Content-Type": "application/json" }
+          });
+        }
+
+        const resendRes = await fetch("https://api.resend.com/emails", {
+          method: "POST",
           headers: {
-            ...cors,
-            "Content-Type": "application/json",
-            "Cache-Control": "no-store"
-          }
+            Authorization: `Bearer ${String(env.RESEND_KEY).trim()}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            from: body.from || "Cekidku <noreply@cekidku.my.id>",
+            to: body.to,
+            subject: body.subject,
+            html: body.html || body.text || "<p>Test email dari Cekidku</p>",
+            reply_to: body.reply_to || "support@cekidku.my.id"
+          })
+        });
+
+        const txt = await resendRes.text();
+        return new Response(txt, {
+          status: resendRes.status,
+          headers: { ...cors, "Content-Type": "application/json" }
         });
       }
 
