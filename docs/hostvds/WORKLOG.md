@@ -15,3 +15,9 @@
 - Frontend: `src/services/vpsApi.ts` (fetch + mapping + hook `useVpsCatalog`), `OrderVpsPage.tsx` memakai data live dengan skeleton & fallback; `RegionCard` mendukung region tanpa data ping; tipe `PlanSpec/ImageSpec/RegionSpec` diperluas (opsional, kompatibel).
 - Verifikasi dengan api-ref OpenStack → paginasi Glance diperbaiki.
 - Berikutnya: deploy + `wrangler secret put OS_PASSWORD/VPS_API_KEY`, cek `/api/vps/endpoints`, isi `REGION_META` & `VPS_PRICING` sesuai HostVDS, sambungkan tombol "Buat Server" ke `POST /servers` (fase 2).
+
+## 2026-10-23 — v0.3 frontend memanggil Worker langsung
+- PR #1 di-merge; build production Cloudflare sukses. Build preview PR gagal (kemungkinan pengaturan preview di dashboard, kode yang sama lolos di `main`).
+- Commit `728b65d` (owner) menghapus `[assets]` dari `wrangler.toml` → Worker kini hanya API, frontend di-host Vercel.
+- Akibatnya `fetch('/api/vps/catalog')` same-origin tidak sampai ke Worker → halaman selalu fallback. Fix: `vpsApi.ts` memanggil `https://boosteryuk.boosteryukid.workers.dev` (override `VITE_VPS_API_URL`). CORS Worker sudah `*`.
+- Tambah `src/vite-env.d.ts` (tipe `import.meta.env`) → error TS frontend 11 → 9.
