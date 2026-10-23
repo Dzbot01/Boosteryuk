@@ -2,6 +2,30 @@ import { createContext, useContext, useEffect, useState } from 'react';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://boosteryuk.com/api';
 
+/**
+ * Mode demo/testing (VITE_DEMO_MODE=true): tidak memanggil API auth asli,
+ * pengunjung langsung masuk sebagai user demo. Build production tidak menyetel
+ * variabel ini sehingga alur auth di bawah tetap seperti semula.
+ */
+export const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === 'true';
+
+const DEMO_TOKEN = 'demo-token';
+
+const DEMO_USER: User = {
+  id: 0,
+  name: 'Demo User',
+  username: 'demo',
+  email: 'demo@boosteryuk.test',
+  initials: 'DU',
+  joined: '2026-01-01',
+  phone: '-',
+  timezone: 'Asia/Jakarta',
+  balance: 250000,
+  role: 'user',
+  plusActive: false,
+  token: DEMO_TOKEN,
+};
+
 type User = {
   id: number;
   name: string;
@@ -33,6 +57,40 @@ type AuthContextType = {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({children}: {children: React.ReactNode}){
+  if (DEMO_MODE) return <DemoAuthProvider>{children}</DemoAuthProvider>;
+  return <RealAuthProvider>{children}</RealAuthProvider>;
+}
+
+/** Auth palsu untuk deployment testing: selalu login sebagai DEMO_USER, tanpa jaringan. */
+function DemoAuthProvider({children}: {children: React.ReactNode}){
+  const [user, setUser] = useState<User | null>(DEMO_USER);
+
+  useEffect(() => {
+    localStorage.setItem('token', DEMO_TOKEN);
+  }, []);
+
+  const signIn = () => {
+    localStorage.setItem('token', DEMO_TOKEN);
+    setUser(DEMO_USER);
+  };
+
+  const value: AuthContextType = {
+    user,
+    loading: false,
+    isAdmin: false,
+    login: async () => { signIn(); return {ok: true}; },
+    register: async () => { signIn(); return {ok: true}; },
+    logout: () => { localStorage.removeItem('token'); setUser(null); },
+    refresh: async () => {},
+    updateUser: async (data) => { setUser(prev => prev ? {...prev, ...data} : prev); return {ok: true}; },
+    topUp: async (amount) => { setUser(prev => prev ? {...prev, balance: prev.balance + amount} : prev); },
+    activatePlus: async () => { setUser(prev => prev ? {...prev, plusActive: true} : prev); },
+  };
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+function RealAuthProvider({children}: {children: React.ReactNode}){
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 

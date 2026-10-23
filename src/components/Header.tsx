@@ -1,8 +1,29 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Menu, Wallet, Settings, LogOut, ChevronRight, Crown, AtSign } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
+import { useAuth, DEMO_MODE } from '../context/AuthContext';
 import { useSiteSettings } from '../context/SiteSettingsContext';
+
+/** Jarak scroll (px) sebelum header berubah menjadi card transparan. */
+const SCROLL_THRESHOLD = 12;
+
+function useScrolled(threshold = SCROLL_THRESHOLD) {
+  const [scrolled, setScrolled] = useState(() => typeof window !== 'undefined' && window.scrollY > threshold);
+  useEffect(() => {
+    let frame = 0;
+    const onScroll = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => setScrolled(window.scrollY > threshold));
+    };
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener('scroll', onScroll);
+    };
+  }, [threshold]);
+  return scrolled;
+}
 
 interface HeaderProps {
   onMenuClick: () => void;
@@ -22,6 +43,7 @@ export default function Header({ onMenuClick }: HeaderProps) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const popRef = useRef<HTMLDivElement>(null);
+  const scrolled = useScrolled();
 
   // Close popover on outside click
   useEffect(() => {
@@ -36,7 +58,15 @@ export default function Header({ onMenuClick }: HeaderProps) {
   const showUserIcon =!!user &&!isAdmin;
 
   return (
-    <header className="fixed left-0 right-0 top-0 z-30 w-full border-b border-slate-200/80 bg-white/85 backdrop-blur-xl dark:border-slate-700/60 dark:bg-slate-900/85">
+    // Posisi, lebar, dan ukuran header selalu sama. Di atas halaman latarnya polos;
+    // setelah di-scroll hanya latar transparan (glass) yang muncul, tetap rata kiri-kanan.
+    <header
+      className={`fixed left-0 right-0 top-0 z-30 w-full border-b transition-[background-color,border-color,box-shadow,backdrop-filter] duration-300 ease-out ${
+        scrolled
+          ? 'border-slate-200/70 bg-white/55 shadow-[0_8px_24px_-16px_rgba(15,23,42,0.35)] backdrop-blur-xl backdrop-saturate-150 dark:border-slate-700/50 dark:bg-slate-900/55'
+          : 'border-transparent bg-transparent shadow-none'
+      }`}
+    >
       <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
         {/* Brand */}
         <Link to={isAdmin? '/admin' : '/'} className="group flex items-center gap-3">
@@ -52,6 +82,11 @@ export default function Header({ onMenuClick }: HeaderProps) {
             </span>
             <span className="mt-1 block text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
               {isAdmin? 'Admin Panel' : 'SMM Panel'}
+              {DEMO_MODE && (
+                <span className="ml-1.5 rounded bg-amber-400/90 px-1 py-px text-[8.5px] tracking-[0.12em] text-slate-900">
+                  DEMO
+                </span>
+              )}
             </span>
           </span>
         </Link>

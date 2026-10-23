@@ -47,7 +47,10 @@ export interface VpsCatalog {
   images: CatalogImage[];
 }
 
-const CATALOG_URL = '/api/vps/catalog';
+// Frontend dan Worker di-host terpisah (Vercel vs Cloudflare), jadi panggil Worker langsung.
+// Bisa di-override lewat env VITE_VPS_API_URL (mis. domain custom Worker).
+const VPS_API_BASE = (import.meta.env.VITE_VPS_API_URL || 'https://boosteryuk.boosteryukid.workers.dev').replace(/\/+$/, '');
+const CATALOG_URL = `${VPS_API_BASE}/api/vps/catalog`;
 
 export async function fetchVpsCatalog(signal?: AbortSignal): Promise<VpsCatalog> {
   const res = await fetch(CATALOG_URL, { signal, headers: { accept: 'application/json' } });
