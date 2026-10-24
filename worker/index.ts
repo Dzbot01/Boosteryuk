@@ -235,14 +235,17 @@ if (url.pathname === "/api/resend/send") {
     }
   );
 }
-      // 4. CALLBACK - FORWARD TO AEONFREE + NOTIFIKASI DEPOSIT TELEGRAM
+    // 4. CALLBACK - FORWARD TO AEONFREE + NOTIFIKASI TELEGRAM
 if (url.pathname.includes("/callback")) {
   const bodyText = await request.text();
-  const tripaySignature = request.headers.get("x-callback-signature") || "";
+  const tripaySignature =
+    request.headers.get("x-callback-signature")?.trim() || "";
+  const callbackEvent =
+    request.headers.get("x-callback-event")?.trim() || "";
 
   console.log("Tripay Callback:", bodyText);
 
-  // Jalur lama ke backend website tetap dipertahankan.
+  // Jalur lama ke backend PHP tetap dipertahankan.
   const forwardTask = async () => {
     try {
       const f = await fetch("https://boosteryuk.com/api/callback.php", {
@@ -251,7 +254,9 @@ if (url.pathname.includes("/callback")) {
           "Content-Type": "application/json",
           "User-Agent":
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-          "X-Callback-Secret": String(env.CALLBACK_SECRET || "BOOSTERYUK123"),
+          "X-Callback-Secret": String(
+            env.CALLBACK_SECRET || "BOOSTERYUK123"
+          ),
           "X-Tripay-Signature": tripaySignature,
           Accept: "application/json, text/plain, */*"
         },
@@ -261,32 +266,41 @@ if (url.pathname.includes("/callback")) {
       const resText = await f.text();
       console.log("Forward to Aeonfree:", f.status, resText);
     } catch (e: any) {
-      console.log("Forward error:", e.message);
+      console.log("Forward error:", e?.message || e);
     }
   };
 
-  // Jalur baru untuk notifikasi deposit sukses ke channel Telegram.
+  // Jalur baru untuk notifikasi pembayaran sukses ke channel Telegram.
   const telegramTask = async () => {
     try {
       const payload = JSON.parse(bodyText);
-      const merchantRef = String(payload.merchant_ref || "");
       const status = String(payload.status || "").toUpperCase();
-      const amount = String(payload.total_amount ?? "");
+      const merchantRef = String(payload.merchant_ref || "");
+      const amount = Number(payload.total_amount);
 
-      // Abaikan selain pembayaran yang benar-benar berstatus PAID.
-      if (status !== "PAID" || !merchantRef || !amount) {
+      if (
+        callbackEvent !== "payment_status" ||
+        status !== "PAID" ||
+        !merchantRef ||
+        !Number.isFinite(amount) ||
+        amount <= 0
+      ) {
+        console.log(
+          "Notifikasi Telegram dilewati: callback bukan pembayaran PAID yang valid."
+        );
         return;
       }
 
-      const merchantCode = String(env.TRIPAY_MERCHANT_CODE || "");
       const privateKey = String(env.TRIPAY_PRIVATE_KEY || "");
 
-      if (!merchantCode || !privateKey || !tripaySignature) {
-        console.log("Notifikasi Telegram dilewati: konfigurasi/verifikasi Tripay belum lengkap.");
+      if (!privateKey || !tripaySignature) {
+        console.log(
+          "Notifikasi Telegram dilewati: private key atau signature belum tersedia."
+        );
         return;
       }
 
-      // Verifikasi signature callback Tripay sebelum mengirim notifikasi.
+      // Verifikasi signature Tripay dari raw body callback.
       const encoder = new TextEncoder();
       const key = await crypto.subtle.importKey(
         "raw",
@@ -299,15 +313,32 @@ if (url.pathname.includes("/callback")) {
       const digest = await crypto.subtle.sign(
         "HMAC",
         key,
-        encoder.encode(merchantCode + merchantRef + amount)
+        encoder.encode(bodyText)
       );
 
       const expectedSignature = Array.from(new Uint8Array(digest))
         .map((byte) => byte.toString(16).padStart(2, "0"))
-        .join("");
+        .join("")
+        .toLowerCase();
 
-      if (expectedSignature.toLowerCase() !== tripaySignature.toLowerCase()) {
-        console.log("Notifikasi Telegram dilewati: signature Tripay tidak valid.");
+      const receivedSignature = tripaySignature.toLowerCase();
+      let signatureDifference =
+        expectedSignature.length ^ receivedSignature.length;
+
+      const compareLength = Math.min(
+        expectedSignature.length,
+        receivedSignature.length
+      );
+
+      for (let i = 0; i < compareLength; i++) {
+        signatureDifference |=
+          expectedSignature.charCodeAt(i) ^ receivedSignature.charCodeAt(i);
+      }
+
+      if (signatureDifference !== 0) {
+        console.log(
+          "Notifikasi Telegram dilewati: signature Tripay tidak valid."
+        );
         return;
       }
 
@@ -315,15 +346,18 @@ if (url.pathname.includes("/callback")) {
       const channelId = String(env.TELEGRAM_SUCCESS_CHANNEL || "");
 
       if (!botToken || !channelId) {
-        console.log("Notifikasi Telegram gagal: TELEGRAM_BOT_TOKEN atau TELEGRAM_SUCCESS_CHANNEL belum diatur.");
+        console.log(
+          "Notifikasi Telegram gagal: TELEGRAM_BOT_TOKEN atau TELEGRAM_SUCCESS_CHANNEL belum diatur."
+        );
         return;
       }
 
-      const formattedAmount = Number(amount).toLocaleString("id-ID");
+      const safeMerchantRef = merchantRef.replace(/[&<>]/g, "");
+      const formattedAmount = amount.toLocaleString("id-ID");
       const message =
-        `✅ <b>Deposit Berhasil</b>\n\n` +
+        `✅ <b>Pembayaran Berhasil</b>\n\n` +
         `💰 Jumlah: Rp${formattedAmount}\n` +
-        `🧾 Referensi: <code>${merchantRef.replace(/[<&>]/g, "")}</code>`;
+        `🧾 Referensi: <code>${safeMerchantRef}</code>`;
 
       const telegramResponse = await fetch(
         `https://api.telegram.org/bot${botToken}/sendMessage`,
@@ -342,14 +376,16 @@ if (url.pathname.includes("/callback")) {
 
       if (!telegramResponse.ok || !telegramResult.ok) {
         console.log("Telegram send error:", telegramResult);
-      } else {
-        console.log("Notifikasi deposit terkirim ke channel.");
+        return;
       }
+
+      console.log("Notifikasi pembayaran terkirim ke channel.");
     } catch (e: any) {
-      console.log("Telegram notification error:", e.message);
+      console.log("Telegram notification error:", e?.message || e);
     }
   };
 
+  // Kegagalan notifikasi Telegram tidak menghentikan forward callback PHP.
   if (ctx?.waitUntil) {
     ctx.waitUntil(Promise.allSettled([forwardTask(), telegramTask()]));
   } else {
