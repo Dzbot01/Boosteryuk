@@ -235,47 +235,131 @@ if (url.pathname === "/api/resend/send") {
     }
   );
 }
-      // 4. CALLBACK - FORWARD TO AEONFREE
-      if (url.pathname.includes("/callback")) {
-        const bodyText = await request.text();
-        const tripaySignature = request.headers.get("x-callback-signature") || "";
+      // 4. CALLBACK - FORWARD TO AEONFREE + NOTIFIKASI DEPOSIT TELEGRAM
+if (url.pathname.includes("/callback")) {
+  const bodyText = await request.text();
+  const tripaySignature = request.headers.get("x-callback-signature") || "";
 
-        console.log("Tripay Callback:", bodyText);
+  console.log("Tripay Callback:", bodyText);
 
-        const forwardTask = async () => {
-          try {
-            const aeonfreeUrl = "https://boosteryuk.com/api/callback.php";
+  // Jalur lama ke backend website tetap dipertahankan.
+  const forwardTask = async () => {
+    try {
+      const f = await fetch("https://boosteryuk.com/api/callback.php", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+          "X-Callback-Secret": String(env.CALLBACK_SECRET || "BOOSTERYUK123"),
+          "X-Tripay-Signature": tripaySignature,
+          Accept: "application/json, text/plain, */*"
+        },
+        body: bodyText
+      });
 
-            const f = await fetch(aeonfreeUrl, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "User-Agent":
-                  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-                "X-Callback-Secret": String(env.CALLBACK_SECRET || "BOOSTERYUK123"),
-                "X-Tripay-Signature": tripaySignature,
-                Accept: "application/json, text/plain, */*"
-              },
-              body: bodyText
-            });
+      const resText = await f.text();
+      console.log("Forward to Aeonfree:", f.status, resText);
+    } catch (e: any) {
+      console.log("Forward error:", e.message);
+    }
+  };
 
-            const resText = await f.text();
-            console.log("Forward to Aeonfree:", f.status, resText);
-          } catch (e: any) {
-            console.log("Forward error:", e.message);
-          }
-        };
+  // Jalur baru untuk notifikasi deposit sukses ke channel Telegram.
+  const telegramTask = async () => {
+    try {
+      const payload = JSON.parse(bodyText);
+      const merchantRef = String(payload.merchant_ref || "");
+      const status = String(payload.status || "").toUpperCase();
+      const amount = String(payload.total_amount ?? "");
 
-        if (ctx && ctx.waitUntil) {
-          ctx.waitUntil(forwardTask());
-        } else {
-          await forwardTask();
-        }
-
-        return new Response(JSON.stringify({ success: true }), {
-          headers: { ...cors, "Content-Type": "application/json" }
-        });
+      // Abaikan selain pembayaran yang benar-benar berstatus PAID.
+      if (status !== "PAID" || !merchantRef || !amount) {
+        return;
       }
+
+      const merchantCode = String(env.TRIPAY_MERCHANT_CODE || "");
+      const privateKey = String(env.TRIPAY_PRIVATE_KEY || "");
+
+      if (!merchantCode || !privateKey || !tripaySignature) {
+        console.log("Notifikasi Telegram dilewati: konfigurasi/verifikasi Tripay belum lengkap.");
+        return;
+      }
+
+      // Verifikasi signature callback Tripay sebelum mengirim notifikasi.
+      const encoder = new TextEncoder();
+      const key = await crypto.subtle.importKey(
+        "raw",
+        encoder.encode(privateKey),
+        { name: "HMAC", hash: "SHA-256" },
+        false,
+        ["sign"]
+      );
+
+      const digest = await crypto.subtle.sign(
+        "HMAC",
+        key,
+        encoder.encode(merchantCode + merchantRef + amount)
+      );
+
+      const expectedSignature = Array.from(new Uint8Array(digest))
+        .map((byte) => byte.toString(16).padStart(2, "0"))
+        .join("");
+
+      if (expectedSignature.toLowerCase() !== tripaySignature.toLowerCase()) {
+        console.log("Notifikasi Telegram dilewati: signature Tripay tidak valid.");
+        return;
+      }
+
+      const botToken = String(env.TELEGRAM_BOT_TOKEN || "");
+      const channelId = String(env.TELEGRAM_SUCCESS_CHANNEL || "");
+
+      if (!botToken || !channelId) {
+        console.log("Notifikasi Telegram gagal: TELEGRAM_BOT_TOKEN atau TELEGRAM_SUCCESS_CHANNEL belum diatur.");
+        return;
+      }
+
+      const formattedAmount = Number(amount).toLocaleString("id-ID");
+      const message =
+        `✅ <b>Deposit Berhasil</b>\n\n` +
+        `💰 Jumlah: Rp${formattedAmount}\n` +
+        `🧾 Referensi: <code>${merchantRef.replace(/[<&>]/g, "")}</code>`;
+
+      const telegramResponse = await fetch(
+        `https://api.telegram.org/bot${botToken}/sendMessage`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: channelId,
+            text: message,
+            parse_mode: "HTML"
+          })
+        }
+      );
+
+      const telegramResult: any = await telegramResponse.json();
+
+      if (!telegramResponse.ok || !telegramResult.ok) {
+        console.log("Telegram send error:", telegramResult);
+      } else {
+        console.log("Notifikasi deposit terkirim ke channel.");
+      }
+    } catch (e: any) {
+      console.log("Telegram notification error:", e.message);
+    }
+  };
+
+  if (ctx?.waitUntil) {
+    ctx.waitUntil(Promise.allSettled([forwardTask(), telegramTask()]));
+  } else {
+    await Promise.allSettled([forwardTask(), telegramTask()]);
+  }
+
+  return new Response(JSON.stringify({ success: true }), {
+    headers: { ...cors, "Content-Type": "application/json" }
+  });
+}
 
       return new Response(JSON.stringify({ ok: true, message: "Worker Active" }), {
         headers: { ...cors, "Content-Type": "application/json" }
