@@ -1,0 +1,19 @@
+{
+  "7009592389": {
+    "userId": "7009592389",
+    "pet": {
+      "type": "pawsy",
+      "name": "Pawsy",
+      "level": 0,
+      "xp": 4,
+      "maxLevel": 150,
+      "lastFeed": "2026-10-24",
+      "lastDrinkFree": null,
+      "lastDrinkVoice": "2026-10-24",
+      "feedThisWeek": 0,
+      "weekId": "2026-W43",
+      "isNew": true,
+      "stopReminder": false
+    }
+  }
+}
