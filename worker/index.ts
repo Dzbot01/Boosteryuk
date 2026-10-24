@@ -235,7 +235,7 @@ if (url.pathname === "/api/resend/send") {
     }
   );
 }
-    // 4. CALLBACK - FORWARD TO AEONFREE + NOTIFIKASI TELEGRAM
+   // 4. CALLBACK - FORWARD TO AEONFREE + NOTIFIKASI FOTO TELEGRAM
 if (url.pathname.includes("/callback")) {
   const bodyText = await request.text();
   const tripaySignature =
@@ -245,7 +245,7 @@ if (url.pathname.includes("/callback")) {
 
   console.log("Tripay Callback:", bodyText);
 
-  // Jalur lama ke backend PHP tetap dipertahankan.
+  // Forward callback ke backend PHP; logic dan konfigurasi lama dipertahankan.
   const forwardTask = async () => {
     try {
       const f = await fetch("https://boosteryuk.com/api/callback.php", {
@@ -270,7 +270,7 @@ if (url.pathname.includes("/callback")) {
     }
   };
 
-  // Jalur baru untuk notifikasi pembayaran sukses ke channel Telegram.
+  // Kirim foto dan caption ke channel untuk pembayaran sukses yang valid.
   const telegramTask = async () => {
     try {
       const payload = JSON.parse(bodyText);
@@ -300,7 +300,7 @@ if (url.pathname.includes("/callback")) {
         return;
       }
 
-      // Verifikasi signature Tripay dari raw body callback.
+      // Verifikasi signature Tripay menggunakan raw body callback.
       const encoder = new TextEncoder();
       const key = await crypto.subtle.importKey(
         "raw",
@@ -344,29 +344,31 @@ if (url.pathname.includes("/callback")) {
 
       const botToken = String(env.TELEGRAM_BOT_TOKEN || "");
       const channelId = String(env.TELEGRAM_SUCCESS_CHANNEL || "");
+      const imageUrl = String(env.TELEGRAM_SUCCESS_IMAGE || "");
 
-      if (!botToken || !channelId) {
+      if (!botToken || !channelId || !imageUrl) {
         console.log(
-          "Notifikasi Telegram gagal: TELEGRAM_BOT_TOKEN atau TELEGRAM_SUCCESS_CHANNEL belum diatur."
+          "Notifikasi Telegram gagal: TELEGRAM_BOT_TOKEN, TELEGRAM_SUCCESS_CHANNEL, atau TELEGRAM_SUCCESS_IMAGE belum diatur."
         );
         return;
       }
 
       const safeMerchantRef = merchantRef.replace(/[&<>]/g, "");
       const formattedAmount = amount.toLocaleString("id-ID");
-      const message =
-        `✅ <b>Pembayaran Berhasil</b>\n\n` +
+      const caption =
+        `✅ <b>Deposit Berhasil</b>\n\n` +
         `💰 Jumlah: Rp${formattedAmount}\n` +
         `🧾 Referensi: <code>${safeMerchantRef}</code>`;
 
       const telegramResponse = await fetch(
-        `https://api.telegram.org/bot${botToken}/sendMessage`,
+        `https://api.telegram.org/bot${botToken}/sendPhoto`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             chat_id: channelId,
-            text: message,
+            photo: imageUrl,
+            caption,
             parse_mode: "HTML"
           })
         }
@@ -375,17 +377,17 @@ if (url.pathname.includes("/callback")) {
       const telegramResult: any = await telegramResponse.json();
 
       if (!telegramResponse.ok || !telegramResult.ok) {
-        console.log("Telegram send error:", telegramResult);
+        console.log("Telegram sendPhoto error:", telegramResult);
         return;
       }
 
-      console.log("Notifikasi pembayaran terkirim ke channel.");
+      console.log("Foto notifikasi deposit terkirim ke channel.");
     } catch (e: any) {
       console.log("Telegram notification error:", e?.message || e);
     }
   };
 
-  // Kegagalan notifikasi Telegram tidak menghentikan forward callback PHP.
+  // Jalankan kedua jalur terpisah agar kegagalan Telegram tidak menghentikan forward PHP.
   if (ctx?.waitUntil) {
     ctx.waitUntil(Promise.allSettled([forwardTask(), telegramTask()]));
   } else {
