@@ -15,53 +15,105 @@ export default {
     if (isVpsRequest(url)) {
       return handleVps(request, env, ctx, cors);
     }
+//pembatas
+
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: cors });
+    }
 
     // 0.1 TELEGRAM - LINK AKUN
-if (url.pathname === "/api/telegram/link") {
-  if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: cors });
-  }
-  try {
-    const body = await request.json() as any;
-    const email = body.email;
-    const telegram_id = body.telegram_id;
+    if (url.pathname === "/api/telegram/link") {
+      if (request.method === "OPTIONS") {
+        return new Response(null, { status: 204, headers: cors });
+      }
+      try {
+        const body = await request.json() as any;
+        const email = body.email;
+        const telegram_id = body.telegram_id;
 
-    if (!email || !telegram_id) {
-      return new Response(JSON.stringify({ status: false, msg: "email & telegram_id wajib dari bot" }), {
-        status: 400, headers: { ...cors, "Content-Type": "application/json" }
-      });
+        if (!email || !telegram_id) {
+          return new Response(JSON.stringify({ status: false, msg: "email & telegram_id wajib dari bot" }), {
+            status: 400, headers: { ...cors, "Content-Type": "application/json" }
+          });
+        }
+
+        const PHP_API = "https://boosteryuk.com/api/link.php";
+        const token = "R4HASIA-BOOSTERYUK-123";
+
+        const forward = await fetch(`${PHP_API}?token=${token}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ email: email, telegram_id: String(telegram_id) })
+        });
+
+        const txt = await forward.text();
+        console.log("PHP RAW LINK:", txt);
+
+        // kalau PHP bales bukan JSON, bungkus jadi JSON biar bot gak bingung
+        try {
+            const json = JSON.parse(txt);
+            return new Response(JSON.stringify(json), {
+                headers: { ...cors, "Content-Type": "application/json" }
+            });
+        } catch {
+            return new Response(JSON.stringify({ status: false, msg: "PHP Error: " + txt.substring(0,300) }), {
+                headers: { ...cors, "Content-Type": "application/json" }
+            });
+        }
+
+      } catch (e: any) {
+        return new Response(JSON.stringify({ status: false, msg: "Worker Error: " + e.message }), {
+          status: 500, headers: { ...cors, "Content-Type": "application/json" }
+        });
+      }
     }
 
-    const PHP_API = "https://boosteryuk.com/api/link.php";
-    const token = "R4HASIA-BOOSTERYUK-123";
+    // 0.2 TELEGRAM - CHECK AKUN (UNTUK /start DINAMIS)
+    if (url.pathname === "/api/telegram/check") {
+      if (request.method === "OPTIONS") {
+        return new Response(null, { status: 204, headers: cors });
+      }
+      try {
+        const telegram_id = url.searchParams.get("telegram_id");
+        if (!telegram_id) {
+          return new Response(JSON.stringify({ status: false, msg: "telegram_id wajib" }), {
+            status: 400, headers: { ...cors, "Content-Type": "application/json" }
+          });
+        }
 
-    const forward = await fetch(`${PHP_API}?token=${token}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ email: email, telegram_id: String(telegram_id) })
-    });
+        const PHP_API = "https://boosteryuk.com/api/check.php";
+        const token = "R4HASIA-BOOSTERYUK-123";
 
-    const txt = await forward.text();
-    console.log("PHP RAW:", txt);
-
-    // kalau PHP bales bukan JSON, bungkus jadi JSON biar bot gak bingung
-    try {
-        const json = JSON.parse(txt);
-        return new Response(JSON.stringify(json), {
-            headers: { ...cors, "Content-Type": "application/json" }
+        const forward = await fetch(`${PHP_API}?token=${token}&telegram_id=${telegram_id}`, {
+          method: "GET"
         });
-    } catch {
-        return new Response(JSON.stringify({ status: false, msg: "PHP Error: " + txt.substring(0,300) }), {
-            headers: { ...cors, "Content-Type": "application/json" }
+
+        const txt = await forward.text();
+        console.log("PHP RAW CHECK:", txt);
+
+        try {
+            const json = JSON.parse(txt);
+            return new Response(JSON.stringify(json), {
+                headers: { ...cors, "Content-Type": "application/json" }
+            });
+        } catch {
+            return new Response(JSON.stringify({ status: false, msg: "PHP Error: " + txt.substring(0,300) }), {
+                headers: { ...cors, "Content-Type": "application/json" }
+            });
+        }
+
+      } catch (e: any) {
+        return new Response(JSON.stringify({ status: false, msg: "Worker Error: " + e.message }), {
+          status: 500, headers: { ...cors, "Content-Type": "application/json" }
         });
+      }
     }
 
-  } catch (e: any) {
-    return new Response(JSON.stringify({ status: false, msg: "Worker Error: " + e.message }), {
-      status: 500, headers: { ...cors, "Content-Type": "application/json" }
+    // DEFAULT
+    return new Response(JSON.stringify({ ok: true, message: "Worker Active" }), {
+      headers: { ...cors, "Content-Type": "application/json" }
     });
-  }
-}
+
 
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: cors });

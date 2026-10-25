@@ -716,7 +716,17 @@ bot.onText(/\/start/, async (msg) => {
         bot.sendMessage(settings.adminId, notifAdmin, { parse_mode: "Markdown" }).catch(()=>{});
     }
 
-    // === JIKA BUKAN USER BARU = MENU LAMA ===
+    // 2. CEK VIA WORKER + check.php APAKAH UDAH LINK
+    let isLinked = false;
+    try {
+        const res = await fetch(`https://boosteryuk.com/api/check.php?token=R4HASIA-BOOSTERYUK-123&telegram_id=${chatId}`).then(r => r.json());
+        if (res.status === true) isLinked = true;
+    } catch (e) {
+        // kalau check.php error, anggap belum link biar tombol muncul
+        isLinked = false;
+    }
+
+    // 3. MENU TEXT (ASLI)
     const menuText = `<blockquote>────✧ <b>ɪɴꜰᴏʀᴍᴀᴛɪᴏɴ</b> ✧
 ᴄᴀᴘᴇᴋ ʙᴇʟɪ ᴘᴀɴᴇʟ ᴍᴜʀᴀʜ ᴛᴀᴘɪ ᴛɪᴀᴘ 3-7 ʜᴀʀɪ ꜱᴇʀᴠᴇʀ ᴍᴀᴛɪ/ᴍᴏᴋᴀᴅ? ʙɪʟᴀɴɢ ɴʏᴀ ᴅɪ ʀᴀᴡᴀᴛ ᴛᴀᴘɪ ᴄᴜᴍᴀ ᴍᴀɴɪꜱ ᴅɪ ᴀᴡᴀʟ 
 ᴘɪɴᴅᴀʜ ᴋᴇ ꜱᴇʀᴠᴇʀ ᴋᴀᴍɪ! 
@@ -727,19 +737,38 @@ bot.onText(/\/start/, async (msg) => {
 <blockquote>⪼ Runtime : <code>${getRuntime()}</code>
 ────────────⧽</blockquote>`;
 
-   const keyboardMenuPertama = {
-        reply_markup: {
-            inline_keyboard: [
-                [
-                    { text: "🌐 Daftar / Login Web", url: "https://boosteryuk.com", style: "primary" },
-                    { text: "🔗 Hubungkan Akun", callback_data: "link_akun", style: "success" }
-                ],
-                [
-                    { text: "𝘉𝘶𝘬𝘢 𝘔𝘦𝘯𝘶", callback_data: "mainmenu", style: "primary" }
+   // 4. BUTTON DINAMIS
+   let keyboardMenuPertama;
+   if (isLinked) {
+       // UDAH LINK = TOMBOL HUBUNGKAN HILANG
+       keyboardMenuPertama = {
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: "🌐 Provider SMM", url: "https://boosteryuk.com", style: "primary" }
+                    ],
+                    [
+                        { text: "𝘉𝘶𝘬𝘢 𝘔𝘦𝘯𝘶", callback_data: "mainmenu", style: "primary" }
+                    ]
                 ]
-            ]
-        }
-    };
+            }
+        };
+   } else {
+       // BELUM LINK = MUNCUL
+       keyboardMenuPertama = {
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: "🌐 Daftar / Login Web", url: "https://boosteryuk.com", style: "primary" },
+                        { text: "🔗 Hubungkan Akun", callback_data: "link_akun", style: "success" }
+                    ],
+                    [
+                        { text: "𝘉𝘶𝘬𝘢 𝘔𝘦𝘯𝘶", callback_data: "mainmenu", style: "primary" }
+                    ]
+                ]
+            }
+        };
+   }
 
     bot.sendChatAction(chatId, "typing");
     setTimeout(() => {
@@ -1796,6 +1825,12 @@ const matchType = caption.match(/- (.+?)<\/b>/i);
   const typeFromCap = matchType? matchType[1] : '';
 const type = matchType? matchType[1] : '';
     try { // <--- TRY DIBUKA DI SINI
+
+  if (q.data === "link_akun") {
+    await bot.answerCallbackQuery(q.id).catch(()=>{});
+    bot.sendMessage(q.message.chat.id, "📧 Masukan email yang kamu gunakan sebagai akun di website boosteryuk.com");
+  }
+//pembatas
 
 //pembatas
   if (data === 'smm') {
@@ -4572,10 +4607,24 @@ function isWeekend() {
   return day === 0 || day === 6
 }
 bot.on('message', async (msg) => {
+  const text = (msg.text || "").trim();
+  if (!text || text.startsWith("/")) return;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) return;
   const userId = msg.from.id;
   const chatId = msg.chat.id;
-  const text = msg.text || '';
 
+
+const res = await fetch(`https://boosteryuk.boosteryukid.workers.dev/api/telegram/link`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: text, telegram_id: chatId })
+  }).then(r => r.json()).catch(()=>({status:false, msg:"Worker error"}));
+
+  if (res.status) {
+    bot.sendMessage(chatId, `✅ Berhasil! Akun berhasil di hubungkan silakan /start kembali`);
+  } else {
+    bot.sendMessage(chatId, `❌ ${res.msg}`);
+  }
   // 1. HANDLE SUBMIT TUGAS - paling atas biar tidak ke skip
 // HANDLE SUBMIT TUGAS STEP 1: EMAIL
 if (userState[userId] && userState[userId].step === 'waiting_email') {
