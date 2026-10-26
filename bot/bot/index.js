@@ -78,6 +78,39 @@ try {
 } catch (error) {
   console.error("Error reading adminUsers file:", error);
 }
+//Fungsi Auto Log ke Channel
+// FUNGSI LOG UNIVERSAL
+const originalLog = console.log;
+
+//dbUser
+// === DATABASE GLOBAL ===
+// === DATABASE GLOBAL (aman) ===
+global.dbUsers = global.dbUsers || {};
+let dbUsers = global.dbUsers
+//
+function sendLog(title, data = "") {
+    const text = String(data);
+    
+    // Tetap tampil di terminal
+    originalLog(`[${title}]`, text);
+
+    // Kirim ke channel - TANPA botUsername
+    const logText = `📥 <b>${title}</b>
+├ Data: <code>${text.slice(0, 3500)}</code>
+└ Time: ${new Date().toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })}`;
+
+    if (LOG_CHANNEL_ID) {
+        bot.sendMessage(LOG_CHANNEL_ID, logText, { parse_mode: "HTML" }).catch(e => {
+            originalLog("Gagal kirim log ke channel:", e.message);
+        });
+    }
+}
+
+// OPTIONAL: Timpa console.log biar semua auto ke channel
+console.log = (...args) => {
+    const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+    sendLog("LOG", msg);
+};
 // Fungsi untuk mengambil data dari database timed
 function getTimedServers() {
     const path = './database/timed_servers.json';
@@ -210,7 +243,39 @@ function cleanDesc(desc) {
 
   return desc;
 }
+//Ambil saldo dari website boosteryuk
+// TARUH DI ATAS SEKALI, DEKAT getStore()
+// === GET SALDO REAL - VERSI FINAL ===
+async function getSaldoReal(chatId) {
+    try {
+        const url = `https://boosteryuk.boosteryukid.workers.dev/api/telegram/check?telegram_id=${chatId}`;
+        const response = await fetch(url);
+        const text = await response.text();
+        
+        let res;
+        try { res = JSON.parse(text); } catch(e) {
+            // kalau masih 502, fallback lokal
+            console.log(`[CHECK 502] ${chatId} -> ${text.substring(0,100)}`);
+            throw new Error("bukan json");
+        }
 
+        if (res.status === true) {
+            const saldo = Number(res.balance) || 0; // PENTING: field nya balance, bukan saldo
+            if (global.dbUsers[chatId]) global.dbUsers[chatId].saldo = saldo;
+            else global.dbUsers[chatId] = { saldo };
+            dbUsers = global.dbUsers;
+            return saldo;
+        } else {
+            // status false = belum link, return 0 bukan error
+            return 0;
+        }
+    } catch (e) {
+        // fallback lokal
+        try {
+            return Number(global.dbUsers[chatId]?.saldo || dbUsers[chatId]?.saldo || 0);
+        } catch { return 0; }
+    }
+}
 //Load Fayupedia
 async function loadSMMServices() {
   try {
@@ -719,7 +784,7 @@ bot.onText(/\/start/, async (msg) => {
     // 2. CEK VIA WORKER + check.php APAKAH UDAH LINK
     let isLinked = false;
     try {
-        const res = await fetch(`https://boosteryuk.com/api/check.php?token=R4HASIA-BOOSTERYUK-123&telegram_id=${chatId}`).then(r => r.json());
+        const res = await fetch(`https://boosteryuk.boosteryukid.workers.dev/api/telegram/check?telegram_id=${chatId}`).then(r => r.json());
         if (res.status === true) isLinked = true;
     } catch (e) {
         // kalau check.php error, anggap belum link biar tombol muncul
@@ -1826,7 +1891,7 @@ const matchType = caption.match(/- (.+?)<\/b>/i);
 const type = matchType? matchType[1] : '';
     try { // <--- TRY DIBUKA DI SINI
 
-  if (q.data === "link_akun") {
+  if (data === "link_akun") {
     await bot.answerCallbackQuery(q.id).catch(()=>{});
     bot.sendMessage(q.message.chat.id, "📧 Masukan email yang kamu gunakan sebagai akun di website boosteryuk.com");
   }
@@ -2417,7 +2482,7 @@ if (query.data.startsWith('do_')) {
         // ====================================================
 if (data.startsWith("klaimvc_")) {
     const dbUsers = getUsers();
-    const mySaldo = dbUsers[chatId]?.saldo || 0; // Ambil saldo terbaru
+    const mySaldo = await getSaldoReal(chatId); // Ambil saldo terbaru
 
     const kode = data.split("_")[1];
     const voucher = activeVouchers[kode];
@@ -2495,7 +2560,7 @@ if (data.startsWith("klaimvc_")) {
         
         if (data.startsWith("buy_")) {
     const dbUsers = getUsers();
-    const mySaldo = dbUsers[chatId]?.saldo || 0; // Ambil saldo dari database
+    const mySaldo = await getSaldoReal(chatId); // Ambil saldo dari database
 
     const parts = data.split("_");
     const detailPaket = parts[1]; // Contoh: "Started 1GB"
@@ -2573,7 +2638,7 @@ if (data.startsWith("ext_")) {
     }
 
     const targetServer = myProfile.servers[srvIndex];
-    const mySaldo = myProfile.saldo || 0;
+    const mySaldo = await getSaldoReal(chatId);
 
     // Logika Tombol Tambah / Kurang Hari
     if (action === "plus") days++;
@@ -2703,16 +2768,49 @@ if (data.startsWith("ext_")) {
         // 1. KETIKA KLIK "CEK KETERSEDIAAN VPS" (MUNCUL LOADING & STOK)
         // ====================================================
 if (data === "check_vps_stock") {
-    // Efek Loading Pura-pura
     await bot.answerCallbackQuery(query.id, { text: "⏳ Sedang mengecek ketersediaan di server..." });
 
     const store = getStore();
     const dbUsers = getUsers();
-    const mySaldo = dbUsers[chatId]?.saldo || 0; // Ambil saldo user
+    const mySaldo = await getSaldoReal(chatId);
 
-    // 1. JIKA STOK HABIS
-    if (store.vps_stock <= 0) {
-        const textHabis = `<blockquote>❌ <b>MOHON MAAF, VPS SEDANG KOSONG</b>\n\nSaat ini belum ada alokasi VPS baru dari Admin. Silakan cek kembali nanti atau hubungi Admin untuk pre-order.</blockquote>`;
+    // Ambil inventory, fallback ke format lama kalau belum update
+    const inventory = store.vps_inventory || {
+        dedicated: { [store.vps_ram || "1GB"]: { stock: store.vps_stock || 0, price: store.vps_price || 0 } },
+        shared: { "1GB": { stock: store.vps_shared_stock || 0, price: store.vps_shared_price || 0 } }
+    };
+
+    const getSpec = (ram) => {
+        if (ram.includes("1GB")) return { cpu: "1 Core Xeon", disk: "10 GB NVMe" };
+        if (ram.includes("2GB")) return { cpu: "1 Core Xeon", disk: "20 GB NVMe" };
+        if (ram.includes("4GB")) return { cpu: "2 Core Xeon", disk: "40 GB NVMe" };
+        if (ram.includes("8GB")) return { cpu: "4 Core Xeon", disk: "80 GB NVMe" };
+        return { cpu: "High Performance", disk: "NVMe SSD" };
+    };
+
+    // Cek stok ready
+    let listDedicated = [];
+    let listShared = [];
+    let buttons = [];
+
+    for (let ram of ["1GB","2GB","4GB","8GB"]) {
+        let item = inventory.dedicated?.[ram];
+        if (item && item.stock > 0) {
+            listDedicated.push({ ram, ...item, ...getSpec(ram) });
+            buttons.push([{ text: `✅ Dedicated ${ram} - Stok ${item.stock}`, callback_data: `confvps_ready_dedicated_${ram}` }]);
+        }
+    }
+    for (let ram of ["1GB","2GB","4GB","8GB"]) {
+        let item = inventory.shared?.[ram];
+        if (item && item.stock > 0) {
+            listShared.push({ ram, ...item });
+            buttons.push([{ text: `⚡ RAM ${ram} - Stok ${item.stock} (Murah)`, callback_data: `confvps_ready_shared_${ram}` }]);
+        }
+    }
+
+    // Jika semua habis
+    if (listDedicated.length === 0 && listShared.length === 0) {
+        const textHabis = `<blockquote>❌ <b>MOHON MAAF, VPS SEDANG KOSONG</b>\n\nSaat ini belum ada alokasi VPS baru dari Admin.</blockquote>`;
         await bot.editMessageCaption(textHabis, {
             chat_id: chatId, message_id: messageId, parse_mode: "HTML",
             reply_markup: { inline_keyboard: [[{ text: "« 𝘒𝘦𝘮𝘣𝘢𝘭𝘪 𝘒𝘦 𝘔𝘦𝘯𝘶", callback_data: "back_to_main" }]] }
@@ -2720,92 +2818,75 @@ if (data === "check_vps_stock") {
         return;
     }
 
-    // 2. LOGIKA SPESIFIKASI (Sesuai RAM)
-    let cpu = ""; let disk = "";
-    if (store.vps_ram.includes("1GB")) { cpu = "1 Core Intel Xeon"; disk = "10 GB NVMe SSD"; }
-    else if (store.vps_ram.includes("2GB")) { cpu = "1 Core Intel Xeon"; disk = "20 GB NVMe SSD"; }
-    else if (store.vps_ram.includes("4GB")) { cpu = "2 Core Intel Xeon"; disk = "40 GB NVMe SSD"; }
-    else { cpu = "High Performance CPU"; disk = "Enterprise NVMe SSD"; }
+    // Build Text
+    let textTersedia = `<blockquote>✅ <b>VPS TERSEDIA - CEK REAL STOCK</b>\n\n`;
 
-    // 3. PERHITUNGAN BIAYA
-    const hargaVps = store.vps_price;
-    const estimasiFee = Math.ceil(hargaVps * 0.007); 
-    const totalBayarQRIS = hargaVps + estimasiFee;
+    if (listDedicated.length > 0) {
+        textTersedia += `🖥️ <b>DEDICATED IP (IP Private)</b>\n`;
+        listDedicated.forEach(v => {
+            textTersedia += `├ ${v.ram} | ${v.cpu} | ${v.disk}\n`;
+            textTersedia += `│  ├ Stok: <b>${v.stock} Unit</b>\n`;
+            textTersedia += `│  └ Harga: <b>Rp ${v.price.toLocaleString('id-ID')}</b>\n`;
+        });
+        textTersedia += `\n`;
+    }
 
-    // 4. CEK STATUS SALDO
-    const statusSaldo = mySaldo >= hargaVps 
-        ? "🟢 <b>Saldo Cukup</b> (Bayar instan)" 
-        : `🔴 <b>Saldo Kurang</b> (Butuh TopUp)`;
+    if (listShared.length > 0) {
+    textTersedia += `🌐 <b>SHARED IP (NAT - Port Forward)</b>\n\n`;
+    listShared.forEach(v => {
+        textTersedia += `├ RAM: <b>${v.ram}</b>\n`;
+        textTersedia += `│  ├ Stok: <b>${v.stock} Unit</b>\n`;
+        textTersedia += `│  └ Harga: <b>Rp ${v.price.toLocaleString('id-ID')}</b>\n`;
+    });
+    textTersedia += `\n`;
+}
 
-    // 5. SIMPAN KE SESI (Agar saat 'Lanjutkan' bot ingat harganya)
-    userSessions[chatId] = {
-        type: "vps",
-        paket: `Cloud VPS ${store.vps_ram}`,
-        harga: hargaVps, // Harga murni untuk potong saldo
-        totalQRIS: totalBayarQRIS, // Harga + fee untuk QRIS
-        step: "viewing_vps_stock"
-    };
+    textTersedia += `💳 Saldo Anda: <b>Rp ${mySaldo.toLocaleString('id-ID')}</b>\n`;
+    textTersedia += `<i>Pilih paket di bawah sesuai RAM yang ready.</i></blockquote>`;
 
-    const textTersedia = `<blockquote>✅ <b>VPS TERSEDIA!</b> (Stok: <b>${store.vps_stock} Unit</b>)
+    buttons.push([{ text: "« 𝘒𝘦𝘮𝘣𝘢𝘭𝘪", callback_data: "menu_vps" }]);
 
-🖥 <b>SPESIFIKASI CLOUD VPS</b>
-🔹 <b>Kapasitas RAM:</b> ${store.vps_ram}
-🔹 <b>Processor:</b> ${cpu}
-🔹 <b>Storage:</b> ${disk}
-🔹 <b>Lokasi Server:</b> Silicon Valley, USA 🇺🇸
-
-📋 <b>RINCIAN BIAYA</b>
-├ Harga Sewa: Rp ${hargaVps.toLocaleString('id-ID')} / Bln
-├ Fee Admin: ~Rp ${estimasiFee.toLocaleString('id-ID')}
-└ <b>Est. Total (QRIS): Rp ${totalBayarQRIS.toLocaleString('id-ID')}</b>
-
-💳 <b>SALDO ANDA:</b> Rp ${mySaldo.toLocaleString('id-ID')}
-ℹ️ <b>Status Saldo:</b> ${statusSaldo}
-
-<i>Klik Lanjutkan Pesanan untuk mengisi data Hostname VPS Anda.</i></blockquote>`;
-
-    // Ubah Gambar dan Teks
     await bot.deleteMessage(chatId, messageId).catch(()=>{});
     await bot.sendPhoto(chatId, settings.panelImage, {
         caption: textTersedia,
         parse_mode: "HTML",
-        reply_markup: {
-            inline_keyboard: [
-                [{ text: "✅ 𝘓𝘢𝘯𝘫𝘶𝘵𝘬𝘢𝘯 𝘗𝘦𝘴𝘢𝘯𝘢𝘯", callback_data: "confvps_ready", style: "success" }],
-                [{ text: "« 𝘒𝘦𝘮𝘣𝘢𝘭𝘪", callback_data: "menu_vps" }]
-            ]
-        }
+        reply_markup: { inline_keyboard: buttons }
     });
     return;
 }
 
-        // ====================================================
-        // 2. KETIKA KLIK "LANJUTKAN PESANAN" (MINTA HOSTNAME)
-        // ====================================================        
-        if (data === "confvps_ready") {
-            const store = getStore();
+// === HANDLER PENGGANTI confvps_ready LAMA ===
+if (data.startsWith("confvps_ready_")) {
+    // data = confvps_ready_dedicated_1GB atau confvps_ready_shared_2GB
+    const parts = data.replace("confvps_ready_","").split("_"); // [dedicated, 1GB]
+    const type = parts[0]; // dedicated / shared
+    const ram = parts[1]; // 1GB
 
-            if (store.vps_stock <= 0) {
-                await bot.answerCallbackQuery(query.id, { text: "Stok baru saja habis direbut orang lain!", show_alert: true });
-                return;
-            }
+    const store = getStore();
+    const inventory = store.vps_inventory[type];
+    if (!inventory || !inventory[ram] || inventory[ram].stock <= 0) {
+        await bot.answerCallbackQuery(query.id, { text: "Stok baru saja habis!", show_alert: true });
+        return;
+    }
 
-            userSessions[chatId] = {
-                type: "vps", 
-                step: "awaiting_hostname",
-                paket: `VPS RAM ${store.vps_ram}`,
-                harga: store.vps_price,
-                lastBotMessageId: messageId 
-            };
+    const item = inventory[ram];
 
-            await bot.deleteMessage(chatId, messageId).catch(()=>{});
+    userSessions[chatId] = {
+        type: `vps_${type}`, // vps_dedicated atau vps_shared
+        ram: ram,
+        paket: `VPS ${type.toUpperCase()} ${ram}`,
+        harga: item.price,
+        step: "awaiting_hostname",
+        lastBotMessageId: messageId
+    };
 
-                        const promptMsg = await bot.sendMessage(chatId, `<blockquote>✅ Anda memesan <b>VPS RAM ${store.vps_ram}</b>.\n\n📝 Silakan ketik <b>Hostname / Nama Server</b> Anda (Contoh: <code>bot-trading</code>):</blockquote>`, { parse_mode: "HTML" });
-            userSessions[chatId].lastBotMessageId = promptMsg.message_id;
+    await bot.deleteMessage(chatId, messageId).catch(()=>{});
+    const promptMsg = await bot.sendMessage(chatId, `<blockquote>✅ Anda memesan <b>${userSessions[chatId].paket}</b>\nHarga: <b>Rp ${item.price.toLocaleString('id-ID')}</b>\n\n📝 Silakan ketik <b>Hostname</b> Anda (Contoh: <code>bot-trading</code>):</blockquote>`, { parse_mode: "HTML" });
+    userSessions[chatId].lastBotMessageId = promptMsg.message_id;
 
-            await bot.answerCallbackQuery(query.id);
-            return; 
-        }
+    await bot.answerCallbackQuery(query.id);
+    return;
+}
 
         // ====================================================
         // BAGIAN 2: LOGIKA "SWITCH" UNTUK MENU TETAP
@@ -3173,19 +3254,28 @@ case "p_dur_168": {
     break;
   }
 
-  const saldoUser = myProfile.saldo || 0;
+  // === REVISI: AMBIL SALDO PANEL DARI DB VIA WORKER ===
+  let mySaldo = await getSaldoReal(chatId);
+  //let saldoUser = myProfile.saldo || 0; // fallback lokal dulu
+ // try {
+//    const resPanel = await fetch(`https://boosteryuk.boosteryukid.workers.dev/api/telegram/check?telegram_id=${chatId}`).then(r => r.json());
+   // if (resPanel.status === true && resPanel.balance !== undefined) {
+    //  saldoUser = resPanel.balance; // INI DARI KOLOM balance
+  //  }
+//  } catch (e) {
+   // console.log("Gagal ambil saldo panel:", e.message);
+//  }
+
   const gachaSisa = 3 - (myProfile.gachaCount || 0);
 
-// 1. Deklarasi dulu pake let biar bisa diubah
-let saldoFreelance = userData.saldoFreelance || 0;
-let saldoPending = userData.saldoPending || 0;
+  let saldoFreelance = userData.saldoFreelance || 0;
+  let saldoPending = userData.saldoPending || 0;
 
-// 2. Baru hitung ulang saldoPending dari task.json
-if (fs.existsSync(FILE_TASK)) {
-    const tasks = JSON.parse(fs.readFileSync(FILE_TASK, "utf8"));
-    const userTasks = tasks.filter(task => String(task.userId) === String(chatId));
-    saldoPending = userTasks.reduce((total, task) => total + (task.saldoPending || 0), 0);
-}
+  if (fs.existsSync(FILE_TASK)) {
+      const tasks = JSON.parse(fs.readFileSync(FILE_TASK, "utf8"));
+      const userTasks = tasks.filter(task => String(task.userId) === String(chatId));
+      saldoPending = userTasks.reduce((total, task) => total + (task.saldoPending || 0), 0);
+  }
 
   // === AMBIL DATA PET ===
   const userPet = await getUserPet(chatId);
@@ -3199,7 +3289,6 @@ if (fs.existsSync(FILE_TASK)) {
     } else if (userPet.pet.level >= halfLevel) {
       fase = "Tumbuh 🌱";
     }
-
     textPet = `\n\n🐾 <b>PET: ${userPet.pet.name}</b>\n`;
     textPet += `├ Level: ${userPet.pet.level}/${userPet.pet.maxLevel} ${fase}\n`;
     textPet += `└ Experience Point: ${userPet.pet.xp}/10 | Sisa: ${sisaExperiencePoint} Experience Point`;
@@ -3207,19 +3296,19 @@ if (fs.existsSync(FILE_TASK)) {
     textPet = `\n\n🐾 <b>PET:</b> Belum ada\nKlik tombol "🐾 Pet" untuk adopsi`;
   }
 
-  // === BLOK DATA FREELANCE ===
-
-let textFreelance = `\n\n💼 <b>FREELANCE</b>\n`;
-textFreelance += `├ Saldo Freelance: Rp${saldoFreelance.toLocaleString("id-ID")}\n`;
-textFreelance += `└ Saldo Pending: Rp${saldoPending.toLocaleString("id-ID")}`;
+  let textFreelance = `\n\n💼 <b>FREELANCE</b>\n`;
+  textFreelance += `├ Saldo Freelance: Rp${saldoFreelance.toLocaleString("id-ID")}\n`;
+  textFreelance += `└ Saldo Pending: Rp${saldoPending.toLocaleString("id-ID")}`;
 
   let textProfil = `<blockquote>👤 <b>PROFIL AKUN</b>\n\n`;
   textProfil += `🆔 ID: <code>${chatId}</code>\n`;
-  textProfil += `💰 <b>SALDO PANEL: Rp ${saldoUser.toLocaleString("id-ID")}</b>\n`;
+  textProfil += `💰 <b>SALDO WEBSITE: Rp ${mySaldo.toLocaleString("id-ID")}</b>\n`; // INI SUDAH DARI DB
   textProfil += `🎰 Gacha Hari Ini: <b>${gachaSisa > 0? gachaSisa : 0}x</b>`;
-  textProfil += textFreelance; // TAMPILIN BLOK FREELANCE DI SINI
-  textProfil += textPet; // TAMPILIN BLOK PET DI SINI
+  textProfil += textFreelance;
+  textProfil += textPet;
   textProfil += `\n\n🟢 <b>SERVER AKTIF:</b>\n`;
+
+  // ... Lanjutan btnProfil sama server list lu biarin sama persis ...
 
   let btnProfil = [
     [
@@ -5561,7 +5650,7 @@ if (userSessions[chatId] && userSessions[chatId].step === "awaiting_username") {
     
     // 1. Ambil data saldo dan harga dari sesi
     const dbUsers = getUsers();
-    const mySaldo = dbUsers[chatId]?.saldo || 0;
+    const mySaldo = await getSaldoReal(chatId);
     const hargaPanel = userSessions[chatId].harga || 0;
 
     userSessions[chatId].username = text;
@@ -5611,7 +5700,7 @@ if (userSessions[chatId] && (userSessions[chatId].step === "awaiting_vps_name" |
     
     // 1. Ambil data Saldo User dari Database
     const dbUsers = getUsers();
-    const mySaldo = dbUsers[chatId]?.saldo || 0;
+    const mySaldo = await getSaldoReal(chatId);
     const hargaVps = userSessions[chatId].harga;
 
     // Bersihkan inputan
@@ -5633,10 +5722,10 @@ if (userSessions[chatId] && (userSessions[chatId].step === "awaiting_vps_name" |
                 [{ text: `💳 Bayar Pakai Saldo (Sisa: Rp ${mySaldo.toLocaleString()})`, callback_data: "pay_via_saldo", style: "success" }],
                 
                 // Baris 2: Metode Pembayaran Luar
-                [
-                    { text: "⚡ QRIS", callback_data: "qr_server_1", style: "success" },
-                    { text: "💎 Crypto", callback_data: "pay_crypto_heleket", style: "success" }
-                ],
+               // [
+                   // { text: "⚡ QRIS", callback_data: "qr_server_1", style: "success" },
+                   // { text: "💎 Crypto", callback_data: "pay_crypto_heleket", style: "success" }
+              //  ],
                 
                 // Baris 3: Batal
                 [{ text: "« 𝘉𝘢𝘵𝘢𝘭𝘬𝘢𝘯 𝘖𝘳𝘥𝘦𝘳", callback_data: "back_to_main" }]

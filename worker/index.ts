@@ -17,10 +17,6 @@ export default {
     }
 //pembatas
 
-    if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: cors });
-    }
-
     // 0.1 TELEGRAM - LINK AKUN
     if (url.pathname === "/api/telegram/link") {
       if (request.method === "OPTIONS") {
@@ -109,12 +105,54 @@ export default {
       }
     }
 
-    // DEFAULT
-    return new Response(JSON.stringify({ ok: true, message: "Worker Active" }), {
-      headers: { ...cors, "Content-Type": "application/json" }
-    });
+    // 0.3 TELEGRAM - POTONG SALDO
+    if (url.pathname === "/api/telegram/deduct") {
+      try {
+        let telegram_id = url.searchParams.get("telegram_id") || "";
+        let amount = url.searchParams.get("amount") || "0";
+        let note = url.searchParams.get("note") || "order bot";
+        
+        if (request.method === "POST") {
+          const body = await request.json().catch(()=> ({}));
+          if (body.telegram_id) telegram_id = String(body.telegram_id);
+          if (body.amount) amount = String(body.amount);
+          if (body.note) note = String(body.note);
+        }
 
-
+        const PHP_API = "https://boosteryuk.com/api/deduct.php";
+        const token = "R4HASIA-BOOSTERYUK-123";
+        const qs = new URLSearchParams({ token, telegram_id, amount, note });
+        const forward = await fetch(`${PHP_API}?${qs.toString()}`);
+        const txt = await forward.text();
+        return new Response(txt, { headers: { ...cors, "Content-Type": "application/json" } });
+      } catch(e) {
+        return new Response(JSON.stringify({status:false,msg:e.message}), {status:500, headers:{...cors,"Content-Type":"application/json"}});
+      }
+    }
+    
+        // 0.4 TELEGRAM - REFUND
+    if (url.pathname === "/api/telegram/refund") {
+      try {
+        let telegram_id = url.searchParams.get("telegram_id") || "";
+        let amount = url.searchParams.get("amount") || "0";
+        let note = url.searchParams.get("note") || "refund bot";
+        if (request.method === "POST") {
+          const body = await request.json().catch(()=> ({}));
+          if (body.telegram_id) telegram_id = String(body.telegram_id);
+          if (body.amount) amount = String(body.amount);
+          if (body.note) note = String(body.note);
+        }
+        const PHP_API = "https://boosteryuk.com/api/refund.php";
+        const token = "R4HASIA-BOOSTERYUK-123";
+        const qs = new URLSearchParams({ token, telegram_id, amount, note });
+        const forward = await fetch(`${PHP_API}?${qs.toString()}`);
+        const txt = await forward.text();
+        return new Response(txt, { headers: { ...cors, "Content-Type": "application/json" } });
+      } catch(e) {
+        return new Response(JSON.stringify({status:false,msg:e.message}), {status:500, headers:{...cors,"Content-Type":"application/json"}});
+      }
+    }
+    
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: cors });
     }
