@@ -10,11 +10,6 @@ export default {
     };
 
     const url = new URL(request.url);
-
-    // 0. HOSTVDS VPS API (/api/vps/*)
-    if (isVpsRequest(url)) {
-      return handleVps(request, env, ctx, cors);
-    }
 //pembatas
 
     // 0.1 TELEGRAM - LINK AKUN

@@ -243,6 +243,26 @@ function cleanDesc(desc) {
 
   return desc;
 }
+//POTONG DAN REFUND SALDO DI WEBSITE
+const WORKER = "https://boosteryuk.boosteryukid.workers.dev";
+
+async function potongSaldoReal(telegram_id, amount, note = "order bot") {
+  const r = await fetch(`${WORKER}/api/telegram/deduct`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ telegram_id, amount, note })
+  });
+  return await r.json(); // { status:true, new_balance:28000, deducted:5000 } atau { status:false, msg:"Saldo tidak cukup" }
+}
+
+async function refundSaldoReal(telegram_id, amount, note = "refund bot") {
+  const r = await fetch(`${WORKER}/api/telegram/refund`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ telegram_id, amount, note })
+  });
+  return await r.json(); // { status:true, new_balance:33000, refunded:5000 }
+}
 //Ambil saldo dari website boosteryuk
 // TARUH DI ATAS SEKALI, DEKAT getStore()
 // === GET SALDO REAL - VERSI FINAL ===
@@ -1224,7 +1244,6 @@ async function getHostvdsToken() {
 // ====================================================
 // FITUR ADMIN: AMBIL ID OS DARI HOSTVDS
 // ====================================================
-const WORKER = "https://boosteryuk.boosteryukid.workers.dev/api/telegram/link";
 
 bot.onText(/\/link (.+)/, async (msg, match) => {
   const email = match[1].trim();
@@ -3437,36 +3456,39 @@ case "menu_deposit":
 case "pay_via_saldo": {
     const userId = query.from.id;
     const session = userSessions[userId];
-    const dbUsers = getUsers();
-    const user = dbUsers[userId];
 
     if (!session || !session.harga) {
         return bot.answerCallbackQuery(query.id, { text: "⚠️ Sesi order hilang, Harap order ulang.", show_alert: true });
     }
 
     const harga = parseInt(session.harga);
-    const saldoSekarang = user.saldo || 0;
 
-    // 1. Cek apakah saldo cukup
-    if (saldoSekarang < harga) {
+    await bot.answerCallbackQuery(query.id, { text: "⏳ Cek saldo & potong...", show_alert: false });
+
+    // 1. POTONG SALDO REAL DARI WEBSITE
+    const potong = await potongSaldoReal(userId, harga, `Order ${session.layanan || session.produk || 'bot'}`);
+
+    if (!potong.status) {
         return bot.answerCallbackQuery(query.id, { 
-            text: `❌ Saldo Tidak Cukup!\n\nHarga: Rp ${harga.toLocaleString()}\nSaldo: Rp ${saldoSekarang.toLocaleString()}\n\nSilakan Top Up dulu di menu Profil.`, 
+            text: `❌ ${potong.msg}\n\nHarga: Rp ${harga.toLocaleString()}\nSilakan Top Up di website boosteryuk.com`, 
             show_alert: true 
         });
     }
 
-    // 2. Jika cukup, Potong Saldo
-    dbUsers[userId].saldo = saldoSekarang - harga;
-    saveUsers(dbUsers); // Simpan perubahan ke file JSON
-
-    await bot.answerCallbackQuery(query.id, { text: "✅ Saldo berhasil dipotong! Memproses pesanan...", show_alert: true });
-
-    // 3. Jalankan Eksekusi Produk (Panel/VPS)
-    // Kita buat Order ID manual dengan awalan "WAL" (Wallet)
-    const walletOrderId = `WAL-${Date.now()}`;
+    // 2. Kalau berhasil potong, baru eksekusi produk
+    await bot.answerCallbackQuery(query.id, { text: `✅ Saldo dipotong! Sisa Rp ${potong.new_balance.toLocaleString()}`, show_alert: false });
     
-    // Panggil fungsi pusat yang sudah kita buat tadi
-    await handlePaymentSuccess(userId, session, walletOrderId, messageId);
+    const walletOrderId = `WAL-${Date.now()}`;
+
+    try {
+        // Panggil fungsi pusat
+        await handlePaymentSuccess(userId, session, walletOrderId, messageId);
+    } catch (err) {
+        // 3. KALAU handlePaymentSuccess GAGAL, REFUND OTOMATIS
+        console.log("Payment success error, refund:", err.message);
+        await refundSaldoReal(userId, harga, `Gagal eksekusi ${walletOrderId}`);
+        await bot.sendMessage(userId, `❌ Order gagal (${err.message}), saldo Rp ${harga.toLocaleString()} sudah di refund.`);
+    }
     
     break;
 }
@@ -5029,6 +5051,46 @@ async function renderUserPage(chatId, page, messageId = null) {
         await bot.sendMessage(chatId, text, options);
     }
 }
+//NATVPS
+bot.onText(/\/natvps/, async (msg) => {
+  const chatId = msg.chat.id;
+  const imageUrl = "https://zcxtbtleeeaeqeryiwea.supabase.co/storage/v1/object/public/video/cara-kerja-nat.png";
+  
+  const teks = `
+🖥️ <b>APA ITU NAT VPS?</b>
+
+<blockquote>
+NAT VPS adalah VPS murah yang share IP Public dengan user lain.
+
+Cara kerjanya kayak kos-kosan:
+
+1. IP Public itu alamat gedung (1 IP dipakai rame-rame)
+2. Port itu nomor kamar kamu (misal 1024, 2024, dll)
+3. Akses VPS kamu via IP:PORT
+
+Penggunaan untuk menjalankan Bot seperti bot WhatsApp, Telegram atau lainnya bisa langsung jalankan di VPS tanpa Panel Pterodactyl.
+
+Penggunaan untuk Bisnis bisa langsung Add user di VPS tanpa Panel Pterodactyl.
+
+✅ Cocok untuk: Bot, Hosting, Belajar Linux
+❌ Tidak untuk: Game port default, IP Dedicated
+❌ Dilarang Install Pterodactyl
+</blockquote>
+`;
+
+  await bot.sendPhoto(chatId, imageUrl, {
+    caption: teks,
+    parse_mode: "HTML",
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: "✅ Cek Ketersediaan", callback_data: "check_vps_stock", style: "success" }
+        ]
+      ]
+    }
+  });
+});
+
 // ====================================================
 // FITUR ADMIN: AMBIL ID OS DARI HOSTVDS
 // ====================================================
