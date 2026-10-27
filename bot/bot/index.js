@@ -274,23 +274,31 @@ async function getSaldoReal(chatId) {
         
         let res;
         try { res = JSON.parse(text); } catch(e) {
-            // kalau masih 502, fallback lokal
+            // kalau dapet "Worker Active" (bukan JSON valid atau JSON ok/message)
+            if (text.includes("Worker Active")) {
+                console.log(`[CHECK WORKER ACTIVE] ${chatId}`);
+                throw new Error("Worker Active");
+            }
             console.log(`[CHECK 502] ${chatId} -> ${text.substring(0,100)}`);
             throw new Error("bukan json");
         }
 
-        if (res.status === true) {
-            const saldo = Number(res.balance) || 0; // PENTING: field nya balance, bukan saldo
+        // FIX: support 2 format
+        const isLinked = res.status === true || res.ok === true;
+        if (isLinked) {
+            const saldo = Number(res.balance || res.saldo || 0);
             if (global.dbUsers[chatId]) global.dbUsers[chatId].saldo = saldo;
             else global.dbUsers[chatId] = { saldo };
             dbUsers = global.dbUsers;
             return saldo;
         } else {
-            // status false = belum link, return 0 bukan error
+            // kalau msg nya Worker Active, jangan return 0, fallback ke lokal
+            if ((res.msg || res.message || "").includes("Worker Active")) {
+                throw new Error("Worker Active");
+            }
             return 0;
         }
     } catch (e) {
-        // fallback lokal
         try {
             return Number(global.dbUsers[chatId]?.saldo || dbUsers[chatId]?.saldo || 0);
         } catch { return 0; }
@@ -801,13 +809,17 @@ bot.onText(/\/start/, async (msg) => {
         bot.sendMessage(settings.adminId, notifAdmin, { parse_mode: "Markdown" }).catch(()=>{});
     }
 
-    // 2. CEK VIA WORKER + check.php APAKAH UDAH LINK
+      // 2. CEK VIA WORKER
     let isLinked = false;
     try {
         const res = await fetch(`https://boosteryuk.boosteryukid.workers.dev/api/telegram/check?telegram_id=${chatId}`).then(r => r.json());
-        if (res.status === true) isLinked = true;
+        // support 2 format
+        if (res.status === true || res.ok === true) {
+            // kalau ok tapi message Worker Active, anggap belum link
+            if ((res.message || "").includes("Worker Active")) isLinked = false;
+            else isLinked = true;
+        }
     } catch (e) {
-        // kalau check.php error, anggap belum link biar tombol muncul
         isLinked = false;
     }
 
@@ -4746,12 +4758,24 @@ const res = await fetch(`https://boosteryuk.boosteryukid.workers.dev/api/telegra
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email: text, telegram_id: chatId })
-  }).then(r => r.json()).catch(()=>({status:false, msg:"Worker error"}));
+  }).then(async r => {
+    const txt = await r.text();
+    try { return JSON.parse(txt); } catch { return { status: false, msg: txt.slice(0,200) }; }
+  }).catch(()=>({status:false, msg:"Worker error"}));
 
-  if (res.status) {
+  // FIX: support {status, msg} dan {ok, message} biar gak undefined
+  const isOk = res.status === true || res.ok === true;
+  const apiMsg = res.msg || res.message || "Unknown error";
+
+  if (isOk) {
     bot.sendMessage(chatId, `✅ Berhasil! Akun berhasil di hubungkan silakan /start kembali`);
   } else {
-    bot.sendMessage(chatId, `❌ ${res.msg}`);
+    // kalau msg masih "Worker Active", ganti jadi pesan jelas
+    if (apiMsg.includes("Worker Active")) {
+      bot.sendMessage(chatId, `❌ Worker belum di-deploy. Cek Cloudflare Worker.`);
+    } else {
+      bot.sendMessage(chatId, `❌ ${apiMsg}`);
+    }
   }
   // 1. HANDLE SUBMIT TUGAS - paling atas biar tidak ke skip
 // HANDLE SUBMIT TUGAS STEP 1: EMAIL
