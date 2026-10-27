@@ -1124,7 +1124,7 @@ async function autoCreatePanel(chatId, username, namaPaket) {
         if (dataUser.errors) {
             console.log("Pterodactyl API Error (User):", dataUser.errors);
             bot.sendMessage(chatId, `⚠️ Gagal membuat user. Mungkin username/email sudah terdaftar, Silakan hubungi admin untuk konfirmasi lebih lanjut.\nError: ${dataUser.errors[0].detail}`);
-            return;
+            throw new Error(dataUser.errors[0].detail || "Gagal membuat user");
         }
         user = dataUser.attributes;
 
@@ -1159,13 +1159,13 @@ async function autoCreatePanel(chatId, username, namaPaket) {
         if (dataServer.errors) {
             console.log("Pterodactyl API Error (Server):", dataServer.errors);
             bot.sendMessage(chatId, `⚠️ User terbuat, tapi gagal membuat Server, Silakan hubungi admin.\nError: ${dataServer.errors[0].detail}`);
-            return;
+            throw new Error(dataServer.errors[0].detail || "Gagal membuat Server");
         }
         server = dataServer.attributes;
 
     } catch (error) {
         bot.sendMessage(chatId, `⚠️ Terjadi error sistem: ${error.message}`);
-        return;
+        throw error; // INI KUNCI BIAR REFUND JALAN
     }
 
     // 3. KIRIM HASIL KE PEMBELI JIKA SUKSES
@@ -1484,7 +1484,7 @@ async function handlePaymentSuccess(chatId, session, orderId, messageId = null) 
             let dbPatungan = getPatungan();
             let room = dbPatungan[session.roomId];
 
-            // A. JIKA ROOM BELUDA ADA (PEMBAYARAN CEO PERTAMA)
+            // A. JIKA ROOM BELUM ADA (PEMBAYARAN CEO PERTAMA)
             if (!room) {
                 const expiresAt = new Date();
                 expiresAt.setHours(expiresAt.getHours() + (session.durasi || 24));
@@ -1492,9 +1492,9 @@ async function handlePaymentSuccess(chatId, session, orderId, messageId = null) 
                 dbPatungan[session.roomId] = {
                     id: session.roomId,
                     paket: session.paket,
-                    targetHarga: session.hargaVps, // Harga asli VPS (misal 35k)
+                    targetHarga: session.hargaVps,
                     current: 0,
-                    mode: session.mode, // 'atur' atau 'flex'
+                    mode: session.mode,
                     slot: session.slot || 999,
                     members: [],
                     status: "OPEN",
@@ -1508,7 +1508,7 @@ async function handlePaymentSuccess(chatId, session, orderId, messageId = null) 
             const newUser = {
                 id: chatId,
                 username: session.username_tg || "User",
-                amount: session.harga, // Nominal yang dibayar (bisa hasil bagi atau input manual)
+                amount: session.harga,
                 role: session.role
             };
 
@@ -1541,8 +1541,9 @@ async function handlePaymentSuccess(chatId, session, orderId, messageId = null) 
             if (messageId) await bot.editMessageCaption(textSukses, { chat_id: chatId, message_id: messageId, parse_mode: "HTML" }).catch(() => {});
             else bot.sendMessage(chatId, textSukses, { parse_mode: "HTML" });
 
+            // FIX: CREATE DULU BARU INCOME, DAN AWAIT
+            await autoCreateVPS(chatId, session.username, session.paket);
             bot.sendMessage(settings.adminId, `<blockquote>🖥️ <b>INCOME: VPS BARU</b>\n━━━━━━━━━━━━━━━━━━\n🆔 ID: <code>${chatId}</code>\n📦 Paket: ${session.paket}\n🧾 Order ID: <code>${orderId}</code></blockquote>`, { parse_mode: "HTML" });
-            autoCreateVPS(chatId, session.username, session.paket);
         }
 
         // --- 5. JIKA JASA INSTALL ---
@@ -1559,15 +1560,18 @@ async function handlePaymentSuccess(chatId, session, orderId, messageId = null) 
             if (messageId) await bot.editMessageCaption(textSukses, { chat_id: chatId, message_id: messageId, parse_mode: "HTML" }).catch(() => {});
             else bot.sendMessage(chatId, textSukses, { parse_mode: "HTML" });
 
+            // FIX: CREATE DULU BARU INCOME, DAN AWAIT
+            await autoCreatePanel(chatId, session.username, session.paket);
             bot.sendMessage(settings.adminId, `<blockquote>📦 <b>INCOME: PANEL BARU</b>\n━━━━━━━━━━━━━━━━━━\n🆔 ID: <code>${chatId}</code>\n👤 User: <code>${session.username}</code>\n🧾 Order ID: <code>${orderId}</code></blockquote>`, { parse_mode: "HTML" });
-            autoCreatePanel(chatId, session.username, session.paket);
         }
 
         delete userSessions[chatId];
 
     } catch (e) {
         console.log("Error handlePaymentSuccess:", e);
-        bot.sendMessage(settings.adminId, `⚠️ <b>ERROR HANDLER:</b> ${e.message}`);
+        bot.sendMessage(settings.adminId, `⚠️ <b>ERROR HANDLER:</b> ${e.message}`).catch(()=>{});
+        // FIX: LEMPAR LAGI BIAR DI pay_via_saldo KETRIGGER REFUND
+        throw e;
     }
 }
 // ====================================================
@@ -1643,6 +1647,8 @@ async function autoCreateVPS(chatId, vpsName, namaPaket) {
     } catch (error) {
         console.error("ERROR CREATE VPS:", error.response ? JSON.stringify(error.response.data) : error.message);
         bot.sendMessage(chatId, "⚠️ *Gagal mendeploy VPS!* Stok mungkin habis. Silakan hubungi Admin.", { parse_mode: "Markdown" });
+        // FIX: LEMPAR ERROR BIAR KE-TRIGGER REFUND DI pay_via_saldo
+        throw error;
     }
 }
 // ====================================================
@@ -3455,6 +3461,8 @@ case "menu_deposit":
     
 case "pay_via_saldo": {
     const userId = query.from.id;
+    const chatId = query.message.chat.id;
+    const messageId = query.message.message_id;
     const session = userSessions[userId];
 
     if (!session || !session.harga) {
@@ -3462,32 +3470,41 @@ case "pay_via_saldo": {
     }
 
     const harga = parseInt(session.harga);
-
+    const namaLayanan = session.paket || session.username || session.layanan || session.produk || 'ITEM'; // FIX DISINI
+    
     await bot.answerCallbackQuery(query.id, { text: "⏳ Cek saldo & potong...", show_alert: false });
 
     // 1. POTONG SALDO REAL DARI WEBSITE
-    const potong = await potongSaldoReal(userId, harga, `Order ${session.layanan || session.produk || 'bot'}`);
+    const potong = await potongSaldoReal(userId, harga, `Order ${namaLayanan}`);
 
     if (!potong.status) {
         return bot.answerCallbackQuery(query.id, { 
-            text: `❌ ${potong.msg}\n\nHarga: Rp ${harga.toLocaleString()}\nSilakan Top Up di website boosteryuk.com`, 
+            text: `❌ ${potong.msg}\nHarga: Rp ${harga.toLocaleString()}\nTop Up di boosteryuk.com`, 
             show_alert: true 
         });
     }
 
-    // 2. Kalau berhasil potong, baru eksekusi produk
-    await bot.answerCallbackQuery(query.id, { text: `✅ Saldo dipotong! Sisa Rp ${potong.new_balance.toLocaleString()}`, show_alert: false });
-    
+    // 2. Kalau berhasil potong, edit pesan biar gak double loading
+    await bot.editMessageText(`✅ Saldo digunakan! Sisa Rp ${potong.new_balance.toLocaleString()}\n\n⏳ Proses order ${namaLayanan}...`, {
+        chat_id: chatId,
+        message_id: messageId
+    });
+
     const walletOrderId = `WAL-${Date.now()}`;
 
     try {
         // Panggil fungsi pusat
         await handlePaymentSuccess(userId, session, walletOrderId, messageId);
     } catch (err) {
-        // 3. KALAU handlePaymentSuccess GAGAL, REFUND OTOMATIS
-        console.log("Payment success error, refund:", err.message);
-        await refundSaldoReal(userId, harga, `Gagal eksekusi ${walletOrderId}`);
-        await bot.sendMessage(userId, `❌ Order gagal (${err.message}), saldo Rp ${harga.toLocaleString()} sudah di refund.`);
+        // 3. KALAU GAGAL, REFUND OTOMATIS
+        console.error("Payment success error, refund:", err.message);
+        const refund = await refundSaldoReal(userId, harga, `Gagal eksekusi ${walletOrderId} - ${err.message}`);
+        
+        if(refund.status){
+            await bot.sendMessage(chatId, `❌ Order gagal (${err.message}), saldo Rp ${harga.toLocaleString()} sudah di refund.\nSisa saldo: Rp ${refund.new_balance.toLocaleString()}`);
+        } else {
+            await bot.sendMessage(chatId, `❌ FATAL: Order gagal & refund gagal! Hubungi admin.\nError: ${err.message} | Refund: ${refund.msg}`);
+        }
     }
     
     break;
@@ -5157,143 +5174,27 @@ bot.onText(/^\/getspek/, async (msg) => {
 // WEBHOOK LISTENER UNTUK PAKASIR (AUTO DEPLOY)
 // ====================================================
 app.post('/webhook', async (req, res) => {
-    const dataWebhook = req.body;
-    
-    if (dataWebhook && dataWebhook.status === "completed") {
-        const orderIdLunas = dataWebhook.order_id;
-        
-        for (const [chatId, session] of Object.entries(userSessions)) {
-            if (session.orderId === orderIdLunas) {
-                
-// ==========================================
-                // TAMBAHKAN INI: JIKA USER DEPOSIT
-                // ==========================================
-                if (session.type === "deposit") {
-                    // Panggil fungsi penambah saldo yang sudah kamu buat
+    try {
+        const dataWebhook = req.body;
+        console.log("Webhook Pakasir:", JSON.stringify(dataWebhook));
+
+        if (dataWebhook && dataWebhook.status === "completed") {
+            const orderIdLunas = dataWebhook.order_id;
+            
+            for (const [chatId, session] of Object.entries(userSessions)) {
+                if (session.orderId === orderIdLunas) {
+                    console.log(`Order LUNAS ${orderIdLunas} untuk ${chatId} type ${session.type}`);
+                    // Panggil 1 pintu aja, semua logic deposit/vps/panel/patungan/hourly ada di sini
                     await handlePaymentSuccess(chatId, session, orderIdLunas);
-                    
-                    // Hapus session agar tidak nyangkut
-                    delete userSessions[chatId];
+                    break;
                 }
-                // ==========================================
-                // 2. JIKA USER PERPANJANG PANEL
-                // ==========================================
-             else if (session.type === "extend") {
-                    const panelUser = extendServer(chatId, session.serverIndex, session.days);
-                    bot.sendMessage(chatId, `<blockquote>🎉 <b>PEMBAYARAN SUKSES!</b>\nPanel <code>${panelUser}</code> telah diperpanjang selama ${session.days} hari.</blockquote>`, { parse_mode: "HTML" });
-                    
-                    const notifAdmin = `<blockquote>💸 <b>INCOME: PERPANJANG PANEL</b>\n━━━━━━━━━━━━━━━━━━\n🆔 ID Pembeli: <code>${chatId}</code>\n🖥 Panel: <code>${panelUser}</code>\n⏳ Tambah: ${session.days} Hari</blockquote>`;
-                    bot.sendMessage(settings.adminId, notifAdmin, { parse_mode: "HTML" }).catch(()=>{});
-                    
-                    delete userSessions[chatId];
-                } 
-
-                // ==========================================
-                // 3. JIKA USER BELI VPS BARU
-                // ==========================================
-                else if (session.type === "vps") {
-                    bot.sendMessage(chatId, `<blockquote>🎉 <b>PEMBAYARAN SUKSES!</b>\nOrder ID: <code>${orderIdLunas}</code>\n\nVPS Anda sedang dideploy di datacenter Amsterdam...</blockquote>`, { parse_mode: "HTML" });
-                    
-                    const notifAdmin = `<blockquote>💸 <b>INCOME: ORDER VPS BARU</b>\n━━━━━━━━━━━━━━━━━━\n🆔 ID Pembeli: <code>${chatId}</code>\n🌐 Hostname: <code>${session.username}</code>\n📦 Paket: ${session.paket}\n🧾 Order ID: <code>${orderIdLunas}</code></blockquote>`;
-                    bot.sendMessage(settings.adminId, notifAdmin, { parse_mode: "HTML" }).catch(()=>{});
-
-                    autoCreateVPS(chatId, session.username, session.paket);
-                    delete userSessions[chatId];
-                } 
-
-                // ==========================================
-                // 4. JIKA USER BELI JASA INSTALL PTERODACTYL
-                // ==========================================
-                else if (session.type === "jasa_install") {
-                    bot.sendMessage(chatId, `<blockquote>🎉 <b>PEMBAYARAN JASA SUKSES!</b>\nOrder ID: <code>${orderIdLunas}</code>\n\nTerima kasih! Mari kita mulai proses instalasinya.</blockquote>`, { parse_mode: "HTML" });
-                    
-                    const notifAdmin = `<blockquote>💸 <b>INCOME: JASA AUTO INSTALL</b>\n━━━━━━━━━━━━━━━━━━\n🆔 ID Pembeli: <code>${chatId}</code>\n🧾 Order ID: <code>${orderIdLunas}</code></blockquote>`;
-                    bot.sendMessage(settings.adminId, notifAdmin, { parse_mode: "HTML" }).catch(()=>{});
-
-                    userSessions[chatId] = { type: "install", step: "awaiting_install_ip" };
-                    bot.sendMessage(chatId, `<blockquote>🖥 <b>TAHAP 1/3: IP ADDRESS</b>\n━━━━━━━━━━━━━━━━━━\n\nSilakan ketik <b>IP VPS</b> Anda:</blockquote>`, { parse_mode: "HTML" })
-                    .then((askIpMsg) => {
-                        userSessions[chatId].lastBotMessageId = askIpMsg.message_id;
-                    });
-                }
-
-                // ==========================================
-                // 5. JIKA USER IKUT PATUNGAN VPS (NEW)
-                // ==========================================
-                else if (session.type === "patungan") {
-                    bot.sendMessage(chatId, `<blockquote>🎉 <b>PEMBAYARAN PATUNGAN BERHASIL!</b>\n\nAnda resmi menjadi <b>${session.role}</b> di kelompok patungan ini. Progres sedang diupdate...</blockquote>`, { parse_mode: "HTML" });
-
-                    let dbPatungan = getPatungan();
-                    let room = dbPatungan[session.roomId];
-
-                    if (!room) {
-                        dbPatungan[session.roomId] = {
-                            id: session.roomId, paket: session.paket, harga: session.targetHarga,
-                            current: 0, members: [], status: "OPEN"
-                        };
-                        room = dbPatungan[session.roomId];
-                    }
-
-                    const newUser = {
-                        id: chatId,
-                        username: session.username_tg || "User",
-                        amount: session.harga,
-                        role: session.role
-                    };
-                    room.members.push(newUser);
-                    room.current += newUser.amount;
-                    savePatungan(dbPatungan);
-
-                    sendJoinNotification(room, newUser);
-
-                    const notifAdmin = `<blockquote>🤝 <b>INCOME: JOIN PATUNGAN</b>\n━━━━━━━━━━━━━━━━━━\n🆔 ID: <code>${chatId}</code>\n🎖 Role: <b>${session.role}</b>\n📦 Paket: ${session.paket}\n📈 Progres: Rp ${room.current}/${room.harga}</blockquote>`;
-                    bot.sendMessage(settings.adminId, notifAdmin, { parse_mode: "HTML" }).catch(()=>{});
-
-                    if (room.current >= room.harga) {
-                        room.status = "PROCESSING";
-                        savePatungan(dbPatungan);
-                        
-                        room.members.forEach(m => {
-                            bot.sendMessage(m.id, `<blockquote>🔥 <b>DANA FULL!</b>\nSemua slot terpenuhi. VPS akan segera dibuat oleh Admin/Sistem.</blockquote>`, { parse_mode: "HTML" }).catch(()=>{});
-                        });
-
-                        bot.sendMessage(settings.adminId, `<blockquote>🚀 <b>DANA PATUNGAN FULL!</b>\nRoom: <code>${session.roomId}</code>\n\nSegera buatkan VPS untuk grup ini.</blockquote>`, { parse_mode: "HTML" });
-                    }
-
-                    delete userSessions[chatId];
-                }
-
-                // ==========================================
-                // 6. JIKA USER BELI SEWA JAM-JAMAN (NEW)
-                // ==========================================
-                else if (session.type === "hourly") {
-                    bot.sendMessage(chatId, `<blockquote>🎉 <b>ᴘᴇᴍʙᴀʏᴀʀᴀɴ ꜱᴇᴡᴀ ᴊᴀᴍ-ᴊᴀᴍᴀɴ ꜱᴜᴋꜱᴇꜱ!</b>\n\nᴘᴀɴᴇʟ ꜱᴇᴅᴀɴɢ ᴅɪʙᴜᴀᴛ ᴏᴛᴏᴍᴀᴛɪꜱ...</blockquote>`, { parse_mode: "HTML" });
-
-                    const notifAdmin = `<blockquote>🕒 <b>💸 INCOME: RENTAL PANEL</b>\n━━━━━━━━━━━━━━━━━━\n🆔 ɪᴅ ᴘᴇᴍʙᴇʟɪ: <code>${chatId}</code>\n⏳ ᴅᴜʀᴀꜱɪ: ${session.jam} ᴊᴀᴍ\n📦 ᴘᴀᴋᴇᴛ: ${session.paket}\n🧾 ᴏʀᴅᴇʀ ɪᴅ: <code>${orderIdLunas}</code></blockquote>`;
-                    bot.sendMessage(settings.adminId, notifAdmin, { parse_mode: "HTML" }).catch(()=>{});
-
-                    autoCreatePanelTimed(chatId, session.paket, session.jam, false);
-                    delete userSessions[chatId];
-                }
-
-                // ==========================================
-                // 7. JIKA USER BELI PANEL PTERODACTYL BARU (DEFAULT)
-                // ==========================================
-                else {
-                    bot.sendMessage(chatId, `<blockquote>🎉 <b>PEMBAYARAN SUKSES!</b>\nOrder ID: <code>${orderIdLunas}</code>\n\nPanel Pterodactyl Anda sedang dibuat...</blockquote>`, { parse_mode: "HTML" });
-                    
-                    const notifAdmin = `<blockquote>💸 <b>INCOME: ORDER PANEL BARU</b>\n━━━━━━━━━━━━━━━━━━\n🆔 ID Pembeli: <code>${chatId}</code>\n👤 Username: <code>${session.username}</code>\n📦 Paket: ${session.paket}\n🧾 Order ID: <code>${orderIdLunas}</code></blockquote>`;
-                    bot.sendMessage(settings.adminId, notifAdmin, { parse_mode: "HTML" }).catch(()=>{});
-
-                    autoCreatePanel(chatId, session.username, session.paket);
-                    delete userSessions[chatId];
-                } 
-                
-                break; 
             }
         }
+        res.status(200).send("OK");
+    } catch (e) {
+        console.log("Error webhook:", e.message);
+        res.status(500).send("Error");
     }
-    res.status(200).send("OK"); 
 });
 
 const port = process.env.SERVER_PORT || 8080;
@@ -5731,12 +5632,12 @@ if (userSessions[chatId] && userSessions[chatId].step === "awaiting_username") {
                 
                 // Baris 2: Metode Pembayaran Luar (QRIS & Crypto)
                 [
-                    { text: "⚡ 𝘘𝘳 𝘚𝘦𝘳𝘷𝘦r 1 (𝘍𝘢𝘴𝘵)", callback_data: "qr_server_1", style: "success" },
+                    //{ text: "⚡ 𝘘𝘳 𝘚𝘦𝘳𝘷𝘦r 1 (𝘍𝘢𝘴𝘵)", callback_data: "qr_server_1", style: "success" },
                     { text: "🪙 Koin Crypto", callback_data: "pay_crypto_heleket", style: "success" }
                 ],
                 
                 // Baris 3: Server Maintenance & Batal
-                [{ text: "𝘘𝘳 𝘚𝘦𝘳𝘷𝘦 r 2 (𝘔𝘢𝘪𝘯𝘵𝘦𝘯𝘢𝘯𝘤𝘦) ❌", callback_data: "qr_server_2", style: "danger" }],
+               // [{ text: "𝘘𝘳 𝘚𝘦𝘳𝘷𝘦 r 2 (𝘔𝘢𝘪𝘯𝘵𝘦𝘯𝘢𝘯𝘤𝘦) ❌", callback_data: "qr_server_2", style: "danger" }],
                 [{ text: "« 𝘉𝘢𝘵𝘢𝘭𝘬𝘢𝘯 𝘖𝘳𝘥𝘦𝘳", callback_data: "back_to_main" }]
             ]
         }

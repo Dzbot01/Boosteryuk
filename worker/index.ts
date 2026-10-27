@@ -531,9 +531,10 @@ if (url.pathname.includes("/callback")) {
   });
 }
 
-      return new Response(JSON.stringify({ ok: true, message: "Worker Active" }), {
-        headers: { ...cors, "Content-Type": "application/json" }
-      });
+      return new Response(JSON.stringify({ status: false, msg: "Endpoint tidak ditemukan: " + url.pathname }), {
+  status: 404,
+  headers: { ...cors, "Content-Type": "application/json" }
+});
     } catch (e: any) {
       return new Response(JSON.stringify({ error: e.message }), {
         status: 500,
