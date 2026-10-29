@@ -45,6 +45,8 @@ const axios = require("axios");
 const settings = require("./database/settings.js");
 // TAMBAH DI settings.json atau di atas
 const LOG_CHANNEL_ID = -1003982464720; // ganti dengan ID channel log lu, harus diawali -100
+const PUBLIC_IP = "185.205.222.202";
+const PUBLIC_PORT = 10892;
 const SMM_BASE = settings.smm.baseUrl;
 const SMM_KEY = settings.smm.apiKey;
 const SMM_ID = settings.smm.apiId;
@@ -254,7 +256,23 @@ async function potongSaldoReal(telegram_id, amount, note = "order bot") {
   });
   return await r.json(); // { status:true, new_balance:28000, deducted:5000 } atau { status:false, msg:"Saldo tidak cukup" }
 }
+//TRIPAY API WORKER
+const WORKER_TRIPAY = "https://boosteryuk.boosteryukid.workers.dev/api/tripay";
+const qrisDiproses = new Set(); // referensi yang sudah diproses (idealnya simpan ke file/DB)
 
+async function buatQrisTripay({ amount, merchant_ref, customer_name }) {
+    const r = await fetch(`${WORKER_TRIPAY}/create`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amount, method: "QRIS", merchant_ref, customer_name, expired_seconds: 1800 })
+    });
+    return await r.json();
+}
+
+async function statusTripay(reference) {
+    const r = await fetch(`${WORKER_TRIPAY}/status?reference=${encodeURIComponent(reference)}`);
+    return await r.json();
+}
 async function refundSaldoReal(telegram_id, amount, note = "refund bot") {
   const r = await fetch(`${WORKER}/api/telegram/refund`, {
     method: "POST",
@@ -796,6 +814,25 @@ Keunggulan: Server kami jauh lebih unggul, stabil, dan kencang dari pesaing karn
 Fitur Unggulan: Voice Note Command Order, Order via Voice Note lebih Cepat, Mudah, dan Hemat karna terdapat diskon potongan harga UpTo Rp. 2000
 Keterangan: Arahkan user untuk pergi ke Menu utama untuk melihat semua menu yang tersedia, dan Arahkan user jika mengalami kendala atau ingin pre Order Vps bisa klik Button menu bantuan di bawah ini.`;
 
+// ===== RICH MESSAGE HELPER =====
+const escHtml = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+async function sendRichMessage(chatId, html, extra = {}) {
+    const res = await fetch(`https://api.telegram.org/bot${bot.token}/sendRichMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            chat_id: chatId,
+            rich_message: { html },
+            ...extra // reply_markup masuk lewat sini
+        })
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.description || "sendRichMessage gagal");
+    return data.result;
+}
+
+// ===== COMMAND /start =====
 bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
     const firstName = msg.from.first_name || "User"; 
@@ -809,7 +846,7 @@ bot.onText(/\/start/, async (msg) => {
         bot.sendMessage(settings.adminId, notifAdmin, { parse_mode: "Markdown" }).catch(()=>{});
     }
 
-      // 2. CEK VIA WORKER
+    // 2. CEK VIA WORKER
     let isLinked = false;
     try {
         const res = await fetch(`https://boosteryuk.boosteryukid.workers.dev/api/telegram/check?telegram_id=${chatId}`).then(r => r.json());
@@ -823,7 +860,7 @@ bot.onText(/\/start/, async (msg) => {
         isLinked = false;
     }
 
-    // 3. MENU TEXT (ASLI)
+    // 3. MENU TEXT (ASLI) - dipakai sebagai fallback
     const menuText = `<blockquote>────✧ <b>ɪɴꜰᴏʀᴍᴀᴛɪᴏɴ</b> ✧
 ᴄᴀᴘᴇᴋ ʙᴇʟɪ ᴘᴀɴᴇʟ ᴍᴜʀᴀʜ ᴛᴀᴘɪ ᴛɪᴀᴘ 3-7 ʜᴀʀɪ ꜱᴇʀᴠᴇʀ ᴍᴀᴛɪ/ᴍᴏᴋᴀᴅ? ʙɪʟᴀɴɢ ɴʏᴀ ᴅɪ ʀᴀᴡᴀᴛ ᴛᴀᴘɪ ᴄᴜᴍᴀ ᴍᴀɴɪꜱ ᴅɪ ᴀᴡᴀʟ 
 ᴘɪɴᴅᴀʜ ᴋᴇ ꜱᴇʀᴠᴇʀ ᴋᴀᴍɪ! 
@@ -834,15 +871,55 @@ bot.onText(/\/start/, async (msg) => {
 <blockquote>⪼ Runtime : <code>${getRuntime()}</code>
 ────────────⧽</blockquote>`;
 
-   // 4. BUTTON DINAMIS
-   let keyboardMenuPertama;
-   if (isLinked) {
-       // UDAH LINK = TOMBOL HUBUNGKAN HILANG
-       keyboardMenuPertama = {
+    // 3b. MENU RICH (tabel + garis pembatas + blok ceklis buka-tutup)
+    const bannerIsUrl = /^https?:\/\//i.test(settings.panelImage || "");
+    const richHtml = `${bannerIsUrl ? `<img src="${settings.panelImage}"/>` : ""}
+<blockquote>────✧ <b>ɪɴꜰᴏʀᴍᴀᴛɪᴏɴ</b> ✧
+
+Dear All, Kini Toko VPS &amp; Panel Legal telah bekerja sama dengan Brand Digital : Boosteryuk Smm Panel 🚀</blockquote>
+<hr>
+<table bordered striped>
+  <tr>
+    <th><b>𝙵𝚒𝚝𝚞𝚛</b></th>
+    <th>𝚄𝚗𝚐𝚐𝚞𝚕𝚊𝚗</th>
+  </tr>
+  <tr>
+    <td>🤝 𝙿𝚊𝚝𝚞𝚗𝚐𝚊𝚗 𝚅𝙿𝚂</td>
+    <td>Order VPS buat rame rame? makin HEMAT!</td>
+  </tr>
+  <tr>
+    <td>🐿 𝙰𝚍𝚘𝚙𝚜𝚒 𝙿𝙴𝚃</td>
+    <td>Rawat Peliharaan dapat VPS!</td>
+  </tr>
+  <tr>
+    <td>🖥 𝚅𝙿𝚂 𝙽𝙰𝚃</td>
+    <td>Jalanin Bot tetap lancar tanpa biaya besar? ini Rekomendasi</td>
+  </tr>
+  <tr>
+    <td>💸 𝙵𝚛𝚎𝚎𝚕𝚊𝚗𝚌𝚎</td>
+    <td>Kerjakan tugas dapat Uang!</td>
+  </tr>
+</table>
+<details open>
+  <summary>Keuntungan @PanelKitaLegalbot</summary>
+  <ul>
+    <li><input type="checkbox" checked>VPS MURAH & LEGAL</li>
+    <li><input type="checkbox" checked>CS Bukan Robot</li>
+    <li><input type="checkbox" checked>Bisa Menghasilkan Cuan.</li>
+  </ul>
+</details>
+<blockquote>⪼ Runtime : <code>${getRuntime()}</code>
+────────────⧽</blockquote>`;
+
+    // 4. BUTTON DINAMIS
+    let keyboardMenuPertama;
+    if (isLinked) {
+        // UDAH LINK = TOMBOL HUBUNGKAN HILANG
+        keyboardMenuPertama = {
             reply_markup: {
                 inline_keyboard: [
                     [
-                        { text: "🌐 Provider SMM", url: "https://boosteryuk.com", style: "primary" }
+                        { text: "🌐 Go To Website", url: "https://boosteryuk.com", style: "primary" }
                     ],
                     [
                         { text: "𝘉𝘶𝘬𝘢 𝘔𝘦𝘯𝘶", callback_data: "mainmenu", style: "primary" }
@@ -850,9 +927,9 @@ bot.onText(/\/start/, async (msg) => {
                 ]
             }
         };
-   } else {
-       // BELUM LINK = MUNCUL
-       keyboardMenuPertama = {
+    } else {
+        // BELUM LINK = MUNCUL
+        keyboardMenuPertama = {
             reply_markup: {
                 inline_keyboard: [
                     [
@@ -865,36 +942,52 @@ bot.onText(/\/start/, async (msg) => {
                 ]
             }
         };
-   }
+    }
+
+    // Voice note acak (sama seperti sebelumnya)
+    const kirimVoice = async () => {
+        try {
+            const voiceDir = path.join(__dirname, "voice");
+            const voiceFiles = fs.readdirSync(voiceDir).filter(file => /\.(ogg|oga)$/i.test(file));
+            if (voiceFiles.length === 0) throw new Error("Tidak ada file .ogg/.oga di folder voice");
+            const voiceFile = voiceFiles[Math.floor(Math.random() * voiceFiles.length)];
+            await bot.sendVoice(chatId, path.join(voiceDir, voiceFile));
+        } catch (err) {
+            console.error("Gagal mengirim voice note:", err.message);
+        }
+    };
 
     bot.sendChatAction(chatId, "typing");
-    setTimeout(() => {
-        bot.sendPhoto(chatId, settings.panelImage, {
-            caption: menuText,
-            parse_mode: "HTML",
-            ...keyboardMenuPertama
-        }).then(async () => {
-            try {
-                const voiceDir = path.join(__dirname, "voice");
-                const voiceFiles = fs.readdirSync(voiceDir).filter(file => /\.(ogg|oga)$/i.test(file));
-                if (voiceFiles.length === 0) throw new Error("Tidak ada file .ogg/.oga di folder voice");
-                const voiceFile = voiceFiles[Math.floor(Math.random() * voiceFiles.length)];
-                await bot.sendVoice(chatId, path.join(voiceDir, voiceFile));
-            } catch (err) {
-                console.error("Gagal mengirim voice note:", err.message);
+    setTimeout(async () => {
+        try {
+            // Kalau panelImage bukan URL (file_id / path lokal), kirim fotonya dulu
+            if (!bannerIsUrl && settings.panelImage) {
+                await bot.sendPhoto(chatId, settings.panelImage);
             }
-        }).catch((err) => {
-            if (isBlockedByUser(err)) return;
-            console.log("Gagal kirim foto start:", err.message);
-            bot.sendMessage(chatId, menuText, {
+            await sendRichMessage(chatId, richHtml, keyboardMenuPertama);
+            await kirimVoice();
+        } catch (richErr) {
+            if (isBlockedByUser(richErr)) return;
+            console.log("Rich message gagal, pakai tampilan lama:", richErr.message);
+
+            // FALLBACK: tampilan lama (foto + caption)
+            bot.sendPhoto(chatId, settings.panelImage, {
+                caption: menuText,
                 parse_mode: "HTML",
                 ...keyboardMenuPertama
-            }).catch((fallbackErr) => {
-                if (!isBlockedByUser(fallbackErr)) {
-                    console.log("Gagal kirim menu:", fallbackErr.message);
-                }
+            }).then(kirimVoice).catch((err) => {
+                if (isBlockedByUser(err)) return;
+                console.log("Gagal kirim foto start:", err.message);
+                bot.sendMessage(chatId, menuText, {
+                    parse_mode: "HTML",
+                    ...keyboardMenuPertama
+                }).catch((fallbackErr) => {
+                    if (!isBlockedByUser(fallbackErr)) {
+                        console.log("Gagal kirim menu:", fallbackErr.message);
+                    }
+                });
             });
-        });
+        }
     }, 1000);
 });
 
@@ -1204,7 +1297,84 @@ async function autoCreatePanel(chatId, username, namaPaket) {
         }
     }
 }
+//AUTO CREATE VPS NAT
+// --- FUNGSI BARU: KHUSUS VPS SHARED (NAT) ---
+async function autoCreateVPSShared(chatId, hostname, customPassword, namaPaket) {
+    bot.sendMessage(chatId, `⏳ Sedang membuat user \`${hostname}\` di Data center Jakarta...`, { parse_mode: "Markdown" });
 
+    // RAM mapping buat info aja
+    let ram = "1GB";
+    if (namaPaket.includes("2GB")) ram = "2GB";
+    if (namaPaket.includes("4GB")) ram = "4GB";
+    if (namaPaket.includes("8GB")) ram = "8GB";
+
+    try {
+        // GANTI INI SESUAI SERVER SHARED LU
+        // Opsi A: Pake API panel shared lu
+        // Opsi B: Pake SSH (paling umum buat NAT)
+        const { NodeSSH } = require('node-ssh');
+        const ssh = new NodeSSH();
+        
+        
+        await ssh.connect({
+    host: settings.vps_shared_host,
+    port: settings.vps_shared_port || 10892,
+    username: 'root',
+    password: settings.vps_shared_root_pass,
+    readyTimeout: 60000
+});
+
+        // 1. Buat user linux + password custom dari user
+        // 2. Limit resource sesuai paket (opsional)
+        const cmd = `
+            id ${hostname} &>/dev/null || useradd -m -s /bin/bash ${hostname} && \
+            echo "${hostname}:${customPassword}" | chpasswd && \
+            usermod -aG sudo ${hostname} || true && \
+            echo "User ${hostname} created"
+        `;
+
+        const result = await ssh.execCommand(cmd);
+        ssh.dispose();
+
+        if (result.stderr && !result.stdout.includes("created")) {
+            throw new Error(result.stderr);
+        }
+
+        const ipShared = settings.vps_shared_host;
+        const port = 22; // atau port custom NAT lu, misal 2000 + id
+
+        const textSuccess = `<blockquote>✅ VPS BERHASIL DIBUAT!
+
+💻 Detail Server:
+├ Hostname: ${hostname}
+├ Paket: ${namaPaket} (${ram})
+├ IP: ${PUBLIC_IP}
+└ Status: Active
+
+🌐 Detail Akses (SSH):
+├ IP Address: ${PUBLIC_IP}
+├ Username: ${hostname}
+├ Password: ${customPassword}
+└ Port: ${PUBLIC_PORT}
+
+Gunakan Termius / Putty / Termux untuk login.\n\nLogin Sekarang: ssh ${hostname}@185.205.222.202 -p 10892\ndan Masukan Password.\n\n❌Dilarang Install Panel Pterodactyl\nMore : /natvps
+</blockquote>`;
+
+        await bot.sendMessage(chatId, textSuccess, { parse_mode: "HTML" });
+
+        // Kurangi stok shared
+        const currentStore = getStore();
+        if (currentStore.vps_inventory?.shared?.[ram]) {
+            currentStore.vps_inventory.shared[ram].stock -= 1;
+            updateStore(currentStore);
+        }
+
+    } catch (error) {
+        console.error("ERROR CREATE VPS SHARED:", error.message);
+        bot.sendMessage(chatId, `⚠️ *Gagal membuat VPS Shared!* Error: ${error.message}`, { parse_mode: "Markdown" });
+        throw error; // biar ke-refund otomatis di pay_via_saldo
+    }
+}
 // ====================================================
 // FUNGSI BANTUAN: LOGIN KE OPENSTACK HOSTVDS
 // Mengembalikan { token, computeUrl }
@@ -1262,7 +1432,7 @@ bot.onText(/\/link (.+)/, async (msg, match) => {
   const chatId = msg.chat.id;
   
   try {
-    const res = await fetch(WORKER, {
+    const res = await fetch( `${WORKER}/api/telegram/link`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, telegram_id: chatId })
@@ -1548,16 +1718,25 @@ async function handlePaymentSuccess(chatId, session, orderId, messageId = null) 
         }
 
         // --- 4. JIKA VPS BARU ---
-        else if (session.type === "vps") {
+        // --- 4. JIKA VPS BARU ---
+                // --- 4. JIKA VPS BARU ---
+                // --- 4. JIKA VPS BARU ---
+        else if (session.type === "vps_shared" || session.type === "vps_dedicated" || String(session.type).startsWith("vps_")) {
             const textSukses = `<blockquote>🎉 <b>PEMBAYARAN SUKSES!</b>\n\nVPS Anda sedang dideploy otomatis...</blockquote>`;
             if (messageId) await bot.editMessageCaption(textSukses, { chat_id: chatId, message_id: messageId, parse_mode: "HTML" }).catch(() => {});
             else bot.sendMessage(chatId, textSukses, { parse_mode: "HTML" });
 
-            // FIX: CREATE DULU BARU INCOME, DAN AWAIT
-            await autoCreateVPS(chatId, session.username, session.paket);
-            bot.sendMessage(settings.adminId, `<blockquote>🖥️ <b>INCOME: VPS BARU</b>\n━━━━━━━━━━━━━━━━━━\n🆔 ID: <code>${chatId}</code>\n📦 Paket: ${session.paket}\n🧾 Order ID: <code>${orderId}</code></blockquote>`, { parse_mode: "HTML" });
-        }
+            // ROUTING FIX - SHARED HARUS DI ATAS
+            if (session.type === "vps_shared") {
+                // Ini yang bener buat VPS SHARED - pakai hostname & password request user
+                await autoCreateVPSShared(chatId, session.hostname, session.password, session.paket);
+            } else {
+                // Ini baru buat DEDICATED (HostVDS Amsterdam)
+                await autoCreateVPS(chatId, session.username, session.paket);
+            }
 
+            bot.sendMessage(settings.adminId, `<blockquote>🖥️ <b>INCOME: VPS BARU</b>\n━━━━━━━━━━━━━━━━━━\n🆔 ID: <code>${chatId}</code>\n📦 Paket: ${session.paket}\n👤 Host: <code>${session.hostname || session.username}</code>\n🧾 Order ID: <code>${orderId}</code></blockquote>`, { parse_mode: "HTML" });
+        }
         // --- 5. JIKA JASA INSTALL ---
         else if (session.type === "jasa_install") {
             bot.sendMessage(chatId, `<blockquote>🎉 <b>PEMBAYARAN JASA SUKSES!</b>\n\nSilakan kirimkan <b>IP VPS</b> Anda:</blockquote>`, { parse_mode: "HTML" });
@@ -1565,9 +1744,9 @@ async function handlePaymentSuccess(chatId, session, orderId, messageId = null) 
             userSessions[chatId] = { type: "install", step: "awaiting_install_ip" };
             return; 
         }
-
-        // --- 6. DEFAULT (PANEL BARU) ---
-        else {
+        
+                // --- 6. DEFAULT (PANEL BARU) ---
+        else if (session.type === "panel") {
             const textSukses = `<blockquote>🎉 <b>PEMBAYARAN SUKSES!</b>\n\nPanel Pterodactyl Anda sedang dibuat...</blockquote>`;
             if (messageId) await bot.editMessageCaption(textSukses, { chat_id: chatId, message_id: messageId, parse_mode: "HTML" }).catch(() => {});
             else bot.sendMessage(chatId, textSukses, { parse_mode: "HTML" });
@@ -1575,6 +1754,10 @@ async function handlePaymentSuccess(chatId, session, orderId, messageId = null) 
             // FIX: CREATE DULU BARU INCOME, DAN AWAIT
             await autoCreatePanel(chatId, session.username, session.paket);
             bot.sendMessage(settings.adminId, `<blockquote>📦 <b>INCOME: PANEL BARU</b>\n━━━━━━━━━━━━━━━━━━\n🆔 ID: <code>${chatId}</code>\n👤 User: <code>${session.username}</code>\n🧾 Order ID: <code>${orderId}</code></blockquote>`, { parse_mode: "HTML" });
+        }
+        // --- 7. SAFETY: KALAU TYPE GAK DIKENAL JANGAN PAKSA JADI PANEL ---
+        else {
+            throw new Error(`Tipe order tidak dikenal: ${session.type} | paket: ${session.paket}`);
         }
 
         delete userSessions[chatId];
@@ -2340,15 +2523,15 @@ if (query.data.startsWith('do_')) {
             const btnPayment = {
                 reply_markup: {
                     inline_keyboard: [
-                        [{ text: "𝘘𝘳 𝘚𝘦𝘳𝘷𝘦𝘳 1 (𝘍𝘢𝘴𝘵) ⚡", callback_data: "qr_server_1" }],
-                        [{ text: "Crypto USD", callback_data: "qr_server_3" }],
-                        [{ text: "𝘘𝘳 𝘚𝘦𝘳𝘷𝘦𝘳 2 (𝘔𝘢𝘪𝘯𝘵𝘦𝘯𝘢𝘯𝘤𝘦) ❌", callback_data: "qr_server_2" }],
+                        [{ text: "⚡ 𝘘𝘳 𝘚𝘦𝘳𝘷𝘦𝘳 1 (𝘍𝘢𝘴𝘵)", callback_data: "pay_qris_tripay" }],
+                    //    [{ text: "Crypto USD", callback_data: "qr_server_3" }],
+                    [{ text: `💳 Bayar Pakai Saldo (Rp ${mySaldo.toLocaleString()})`, callback_data: "pay_via_saldo", style: "success" }],
                         [{ text: "« 𝘉𝘢𝘵𝘢𝘭𝘬𝘢𝘯 𝘖𝘳𝘥𝘦𝘳", callback_data: "back_to_main" }]
                     ]
                 }
             };
             
-            const promptMsg = await bot.sendMessage(chatId, `<blockquote>✅ <b>Pesanan Jasa Install Dibuat.</b>\n━━━━━━━━━━━━━━━━━━\n\nSilakan pilih Server QRIS untuk melakukan pembayaran:</blockquote>`, { parse_mode: "HTML", ...btnPayment });
+            const promptMsg = await bot.sendMessage(chatId, `<blockquote>✅ <b>Pesanan Jasa Install Dibuat.</b>\n━━━━━━━━━━━━━━━━━━\n\nSilakan Konfirmasi Metode pembayaran:</blockquote>`, { parse_mode: "HTML", ...btnPayment });
             
             userSessions[chatId].lastBotMessageId = promptMsg.message_id;
             await bot.answerCallbackQuery(query.id);
@@ -2715,7 +2898,7 @@ if (data.startsWith("ext_")) {
                     [{ text: `💳 Bayar Pakai Saldo (Rp ${mySaldo.toLocaleString()})`, callback_data: "pay_via_saldo", style: "success" }],
                     // Metode Luar
                     [
-                        { text: "⚡ QRIS FAST", callback_data: "qr_server_1" },
+                    //    { text: "⚡ QRIS FAST", callback_data: "qr_server_1" },
                         { text: "🪙 Koin Crypto", callback_data: "pay_crypto_heleket" }
                     ],
                     [{ text: "« Batal", callback_data: `ext_ui_${srvIndex}_${days}` }]
@@ -2808,14 +2991,19 @@ if (data === "check_vps_stock") {
     await bot.answerCallbackQuery(query.id, { text: "⏳ Sedang mengecek ketersediaan di server..." });
 
     const store = getStore();
-    const dbUsers = getUsers();
     const mySaldo = await getSaldoReal(chatId);
 
-    // Ambil inventory, fallback ke format lama kalau belum update
-    const inventory = store.vps_inventory || {
-        dedicated: { [store.vps_ram || "1GB"]: { stock: store.vps_stock || 0, price: store.vps_price || 0 } },
-        shared: { "1GB": { stock: store.vps_shared_stock || 0, price: store.vps_shared_price || 0 } }
-    };
+    // Gabungin data lama (dari /setvps) + inventory baru biar gak hilang
+    let inventory = store.vps_inventory || { dedicated: {}, shared: {} };
+    
+    // Fallback VPS Biasa dari /setvps
+    if (store.vps_ram && store.vps_stock > 0) {
+        inventory.dedicated[store.vps_ram] = { stock: store.vps_stock, price: store.vps_price };
+    }
+    // Fallback VPS Shared dari /setvps shared -> INI YANG BIKIN MUNCUL
+    if (store.vps_shared_ram && store.vps_shared_stock > 0) {
+        inventory.shared[store.vps_shared_ram] = { stock: store.vps_shared_stock, price: store.vps_shared_price };
+    }
 
     const getSpec = (ram) => {
         if (ram.includes("1GB")) return { cpu: "1 Core Xeon", disk: "10 GB NVMe" };
@@ -2825,7 +3013,6 @@ if (data === "check_vps_stock") {
         return { cpu: "High Performance", disk: "NVMe SSD" };
     };
 
-    // Cek stok ready
     let listDedicated = [];
     let listShared = [];
     let buttons = [];
@@ -2837,25 +3024,23 @@ if (data === "check_vps_stock") {
             buttons.push([{ text: `✅ Dedicated ${ram} - Stok ${item.stock}`, callback_data: `confvps_ready_dedicated_${ram}` }]);
         }
     }
-    for (let ram of ["1GB","2GB","4GB","8GB"]) {
-        let item = inventory.shared?.[ram];
+    // INI SEKARANG BACA SEMUA RAM SHARED, BUKAN CUMA 1GB
+    for (let ram of Object.keys(inventory.shared)) {
+        let item = inventory.shared[ram];
         if (item && item.stock > 0) {
             listShared.push({ ram, ...item });
-            buttons.push([{ text: `⚡ RAM ${ram} - Stok ${item.stock} (Murah)`, callback_data: `confvps_ready_shared_${ram}` }]);
+            buttons.push([{ text: `⚡ NAT ${ram} - Stok ${item.stock}`, callback_data: `confvps_ready_shared_${ram}` }]);
         }
     }
 
-    // Jika semua habis
     if (listDedicated.length === 0 && listShared.length === 0) {
         const textHabis = `<blockquote>❌ <b>MOHON MAAF, VPS SEDANG KOSONG</b>\n\nSaat ini belum ada alokasi VPS baru dari Admin.</blockquote>`;
-        await bot.editMessageCaption(textHabis, {
+        return bot.editMessageCaption(textHabis, {
             chat_id: chatId, message_id: messageId, parse_mode: "HTML",
-            reply_markup: { inline_keyboard: [[{ text: "« 𝘒𝘦𝘮𝘣𝘢𝘭𝘪 𝘒𝘦 𝘔𝘦𝘯𝘶", callback_data: "back_to_main" }]] }
+            reply_markup: { inline_keyboard: [[{ text: "« Kembali Ke Menu", callback_data: "back_to_main" }]] }
         }).catch(()=>{});
-        return;
     }
 
-    // Build Text
     let textTersedia = `<blockquote>✅ <b>VPS TERSEDIA - CEK REAL STOCK</b>\n\n`;
 
     if (listDedicated.length > 0) {
@@ -2869,19 +3054,19 @@ if (data === "check_vps_stock") {
     }
 
     if (listShared.length > 0) {
-    textTersedia += `🌐 <b>SHARED IP (NAT - Port Forward)</b>\n\n`;
-    listShared.forEach(v => {
-        textTersedia += `├ RAM: <b>${v.ram}</b>\n`;
-        textTersedia += `│  ├ Stok: <b>${v.stock} Unit</b>\n`;
-        textTersedia += `│  └ Harga: <b>Rp ${v.price.toLocaleString('id-ID')}</b>\n`;
-    });
-    textTersedia += `\n`;
-}
+        textTersedia += `🌐 <b>SHARED IP (NAT - Port Forward)</b>\n`;
+        listShared.forEach(v => {
+            textTersedia += `├ RAM: <b>${v.ram}</b>\n`;
+            textTersedia += `│  ├ Stok: <b>${v.stock} Unit</b>\n`;
+            textTersedia += `│  └ Harga: <b>Rp ${v.price.toLocaleString('id-ID')}</b>\n`;
+        });
+        textTersedia += `\n`;
+    }
 
     textTersedia += `💳 Saldo Anda: <b>Rp ${mySaldo.toLocaleString('id-ID')}</b>\n`;
     textTersedia += `<i>Pilih paket di bawah sesuai RAM yang ready.</i></blockquote>`;
 
-    buttons.push([{ text: "« 𝘒𝘦𝘮𝘣𝘢𝘭𝘪", callback_data: "menu_vps" }]);
+    buttons.push([{ text: "« Kembali", callback_data: "menu_vps" }]);
 
     await bot.deleteMessage(chatId, messageId).catch(()=>{});
     await bot.sendPhoto(chatId, settings.panelImage, {
@@ -3042,6 +3227,73 @@ const textMenuLainnya = `<blockquote>( 👋 ) - <b>ʜᴀʟᴏ ꜱᴇʟᴀᴍᴀ�
             reply_markup: keyboardMenuLainnya
         });
     });
+    break;
+}
+case "pay_qris_tripay": {
+    const userId = query.from.id;
+    const session = userSessions[userId];
+
+    if (!session || !session.harga) {
+        return bot.answerCallbackQuery(query.id, { text: "⚠️ Harga tidak ditemukan, Silakan order ulang.", show_alert: true });
+    }
+    bot.answerCallbackQuery(query.id, { text: "Membuat QRIS..." }).catch(() => {});
+
+    try {
+        const amount = parseInt(String(session.harga).replace(/[^0-9]/g, ""));
+        const ref = `QRIS1-${userId}-${Date.now()}`;
+
+        const res = await buatQrisTripay({ amount, merchant_ref: ref, customer_name: query.from.first_name || "User" });
+        if (!res.success) {
+            console.log("QRIS 1 gagal:", JSON.stringify(res));
+            return bot.sendMessage(userId, "⚠️ Gagal membuat QRIS: " + (res.message || "coba lagi nanti."));
+        }
+
+        const d = res.data;
+        const caption = `💳 <b>PEMBAYARAN QRIS</b>\n\n💵 Total: <b>Rp ${Number(d.amount).toLocaleString("id-ID")}</b>\n🆔 Referensi: <code>${d.reference}</code>\n\n<i>Scan QR di atas dengan e-wallet atau m-banking. Berlaku 30 menit.</i>`;
+        const kb = {
+            reply_markup: {
+                inline_keyboard: [
+                    [{ text: "🔄 CEK STATUS", callback_data: `cek_qris_${d.reference}`, style: "success" }],
+                    [{ text: "« Kembali", callback_data: "back_to_main" }]
+                ]
+            }
+        };
+
+        let sent;
+        if (d.qr_string) {
+            const buf = await QRCode.toBuffer(d.qr_string, { width: 600, margin: 2 });
+            sent = await bot.sendPhoto(userId, buf, { caption, parse_mode: "HTML", ...kb }, { filename: "qris.png", contentType: "image/png" });
+        } else {
+            sent = await bot.sendPhoto(userId, d.qr_url, { caption, parse_mode: "HTML", ...kb });
+        }
+
+        // Pantau status tiap 5 detik, maksimal 30 menit
+        let n = 0;
+        const timer = setInterval(async () => {
+            n++;
+            try {
+                const st = await statusTripay(d.reference);
+                const s = st && st.data && st.data.status;
+
+                if (s === "PAID") {
+                    clearInterval(timer);
+                    if (qrisDiproses.has(d.reference)) return; // cegah proses ganda
+                    qrisDiproses.add(d.reference);
+
+                    await bot.deleteMessage(userId, sent.message_id).catch(() => {});
+                    bot.sendMessage(userId, `✅ <b>Pembayaran berhasil!</b>\nReferensi: <code>${d.reference}</code>`, { parse_mode: "HTML" });
+                    // TODO: lanjutkan proses order di sini (buat panel / VPS)
+                } else if (s === "EXPIRED" || s === "FAILED" || n >= 360) {
+                    clearInterval(timer);
+                    bot.sendMessage(userId, "⌛ QRIS kedaluwarsa atau gagal. Silakan order ulang.");
+                }
+            } catch (e) { /* coba lagi di putaran berikutnya */ }
+        }, 5000);
+
+    } catch (e) {
+        console.log("QRIS error:", e.message);
+        bot.sendMessage(userId, "⚠️ Terjadi kesalahan saat membuat QRIS.");
+    }
     break;
 }
 case "menu_hourly": {
@@ -3428,26 +3680,52 @@ case "roll_gacha": {
     }
 
     myProfile.gachaCount += 1;
+    const gachaKe = myProfile.gachaCount;
+
+    // simpan dulu sebelum ada await, supaya klik cepat berkali-kali tidak lolos batas 3x
+    saveUsers(dbUsers);
     
     // Sistem Win Rate Rendah (Misal 5% peluang menang)
     // Berdasarkan permintaan: menang sulit (rate rendah)
-    const winRate = Math.random() < 0.50; // 0.05 = 5% peluang menang
+    const winRate = Math.random() < 0.5; // 0.05 = 5% peluang menang
     let textResult = "";
     
-    bot.sendMessage(settings.adminId, `🎰 <b>GACHA LOG</b>\nUser: ${chatId}\nUsername: ${myProfile.username}\nKlik Gacha ke-${myProfile.gachaCount}`);
+    bot.sendMessage(settings.adminId, `🎰 <b>GACHA LOG</b>\nUser: ${chatId}\nUsername: ${myProfile.username}\nKlik Gacha ke-${gachaKe}`);
 
     if (winRate) {
         const hadiah = 5;
-        myProfile.saldo = (myProfile.saldo || 0) + hadiah;
-        textResult = `🎉 <b>SELAMAT!</b>\n\nKamu mendapatkan saldo gratis sebesar <b>Rp ${hadiah}</b>! Saldo telah ditambahkan ke profilmu.`;
-        
-        // Notif Admin
-        bot.sendMessage(settings.adminId, `🔥 <b>GACHA WINNER!</b>\nUser: ${chatId}\nMendapatkan: Rp ${hadiah}`);
+
+        // Kreditkan langsung ke saldo website lewat worker
+        let kreditWeb = false;
+        try {
+            const res = await refundSaldoReal(chatId, hadiah, "hadiah gacha bot");
+            kreditWeb = !!(res && res.status === true);
+            if (!kreditWeb) console.log("Gacha kredit web gagal:", res && res.msg);
+        } catch (e) {
+            console.log("Gacha kredit web error:", e.message);
+        }
+
+        if (kreditWeb) {
+            textResult = `🎉 <b>SELAMAT!</b>\n\nKamu mendapatkan saldo gratis sebesar <b>Rp ${hadiah}</b>! Saldo telah ditambahkan ke profilmu.`;
+
+            // Notif Admin
+            bot.sendMessage(settings.adminId, `🔥 <b>GACHA WINNER!</b>\nUser: ${chatId}\nMendapatkan: Rp ${hadiah}`);
+        } else {
+            // Akun web belum link / worker error: hadiah masuk saldo bot agar user tidak rugi
+            const fresh = getUsers();
+            if (fresh[chatId]) {
+                fresh[chatId].saldo = (fresh[chatId].saldo || 0) + hadiah;
+                saveUsers(fresh);
+            }
+            textResult = `🎉 <b>SELAMAT!</b>\n\nKamu mendapatkan saldo gratis sebesar <b>Rp ${hadiah}</b>! Akun website belum terhubung, jadi hadiah masuk ke saldo bot.`;
+
+            bot.sendMessage(settings.adminId, `⚠️ <b>GACHA WINNER (kredit web gagal)</b>\nUser: ${chatId}\nHadiah: Rp ${hadiah} masuk ke saldo bot`);
+        }
     } else {
-        textResult = `🎰 <b>ZONK!</b>\n\nMaaf, kamu belum beruntung di putaran ke-${myProfile.gachaCount}. Ayo coba lagi!`;
+        textResult = `🎰 <b>ZONK!</b>\n\nMaaf, kamu belum beruntung di putaran ke-${gachaKe}. Ayo coba lagi!`;
     }
 
-    const sisa = 3 - myProfile.gachaCount;
+    const sisa = 3 - gachaKe;
     let btnGacha = [];
     
     if (sisa > 0) {
@@ -3455,8 +3733,6 @@ case "roll_gacha": {
     }
     btnGacha.push([{ text: "« Kembali ke Profil", callback_data: "menu_profil" }]);
 
-    saveUsers(dbUsers);
-    
     await bot.editMessageText(textResult, {
         chat_id: chatId,
         message_id: messageId,
@@ -3475,16 +3751,17 @@ case "pay_via_saldo": {
     const userId = query.from.id;
     const chatId = query.message.chat.id;
     const messageId = query.message.message_id;
-    const session = userSessions[userId];
+    // FIX: Cek 2 key biar gak hilang sesi (private chat userId == chatId, di grup beda)
+    const session = userSessions[userId] || userSessions[chatId] || userSessions[String(userId)] || userSessions[String(chatId)];
 
     if (!session || !session.harga) {
         return bot.answerCallbackQuery(query.id, { text: "⚠️ Sesi order hilang, Harap order ulang.", show_alert: true });
     }
 
     const harga = parseInt(session.harga);
-    const namaLayanan = session.paket || session.username || session.layanan || session.produk || 'ITEM'; // FIX DISINI
+    const namaLayanan = session.paket || session.layanan || session.produk || session.username || 'ITEM';
     
-    await bot.answerCallbackQuery(query.id, { text: "⏳ Cek saldo & potong...", show_alert: false });
+    await bot.answerCallbackQuery(query.id, { text: "⏳ Sebentar ya...", show_alert: false });
 
     // 1. POTONG SALDO REAL DARI WEBSITE
     const potong = await potongSaldoReal(userId, harga, `Order ${namaLayanan}`);
@@ -3496,7 +3773,7 @@ case "pay_via_saldo": {
         });
     }
 
-    // 2. Kalau berhasil potong, edit pesan biar gak double loading
+    // 2. Kalau berhasil potong, edit pesan biar gak double loading - UI TETAP
     await bot.editMessageText(`✅ Saldo digunakan! Sisa Rp ${potong.new_balance.toLocaleString()}\n\n⏳ Proses order ${namaLayanan}...`, {
         chat_id: chatId,
         message_id: messageId
@@ -3505,11 +3782,12 @@ case "pay_via_saldo": {
     const walletOrderId = `WAL-${Date.now()}`;
 
     try {
-        // Panggil fungsi pusat
-        await handlePaymentSuccess(userId, session, walletOrderId, messageId);
+        // FIX: Panggil pakai chatId (buat kirim pesan), tapi session tetap yang ada type-nya
+        // Jangan pakai userId di sini, karena handlePaymentSuccess butuh chatId
+        await handlePaymentSuccess(chatId, session, walletOrderId, messageId);
     } catch (err) {
-        // 3. KALAU GAGAL, REFUND OTOMATIS
-        console.error("Payment success error, refund:", err.message);
+        // 3. KALAU GAGAL, REFUND OTOMATIS - UI TETAP
+        console.error(`[PAY_VIA_SALDO] Gagal ${namaLayanan} type=${session.type} paket=${session.paket}:`, err.message);
         const refund = await refundSaldoReal(userId, harga, `Gagal eksekusi ${walletOrderId} - ${err.message}`);
         
         if(refund.status){
@@ -4420,100 +4698,145 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 // ====================================================
 bot.onText(/^\/setvps(?:\s+(.*))?$/, async (msg, match) => {
     const chatId = msg.chat.id;
-    
-    // Pastikan hanya admin yang bisa menjalankan perintah ini
     if (String(chatId) !== String(settings.adminId)) return;
 
     const inputText = match[1];
+    const botUsername = "@" + (await bot.getMe()).username; 
 
-    // 1. PANDUAN PENGGUNAAN (JIKA KOSONG ATAU SALAH FORMAT)
-    // Cek apakah admin hanya mengetik /setvps atau teks kurang dari 3 kata
+    // --- PANDUAN ---
     if (!inputText || inputText.trim().split(/\s+/).length < 3) {
-        const panduanMsg = `<blockquote>⚠️ <b>FORMAT PERINTAH SALAH!</b>\n━━━━━━━━━━━━━━━━━━\n\nUntuk mengupdate dan menyebar stok VPS, gunakan format berikut:\n\n<code>/setvps [Spek_VPS] [Harga] [Stok]</code>\n\n<b>📌 Contoh Penggunaan:</b>\n<code>/setvps 2GB 2 Core 15000 10</code>\n\n<i>Keterangan:</i>\n- <b>2GB 2 Core</b>: Spesifikasi VPS (Boleh pakai spasi).\n- <b>15000</b>: Harga sewa per bulan (Wajib Angka).\n- <b>10</b>: Jumlah stok VPS yang tersedia (Wajib Angka).</blockquote>`;
-        
+        const panduanMsg = `<blockquote>⚠️ <b>FORMAT PERINTAH SALAH!</b>
+━━━━━━━━━━━━━━━━━━
+
+<b>Untuk VPS Biasa:</b>
+<code>/setvps [Spek] [Harga] [Stok]</code>
+Contoh: <code>/setvps 2GB 2 Core 15000 10</code>
+
+<b>Untuk VPS Shared NAT:</b>
+<code>/setvps shared [Spek] [Harga] [Stok]</code>
+Contoh: <code>/setvps shared 1GB 10000 100</code>
+</blockquote>`;
         return bot.sendMessage(chatId, panduanMsg, { parse_mode: "HTML" });
     }
 
-    // 2. PECAH TEKS SECARA CERDAS
-    const args = inputText.trim().split(/\s+/);
-    
-    // Ambil 2 angka paling belakang sebagai Stok dan Harga
-    const stok = parseInt(args.pop());
-    const harga = parseInt(args.pop());
-    
-    // Sisanya yang di depan digabung kembali sebagai nama RAM/Spek
-    const ram = args.join(" ");
+    // --- DETEKSI TIPE ---
+    let args = inputText.trim().split(/\s+/);
+    let isShared = false;
 
-    // Validasi Angka
-    if (isNaN(harga) || isNaN(stok)) {
-        return bot.sendMessage(chatId, "<blockquote>⚠️ <b>Gagal:</b> Harga dan Stok harus berupa angka murni tanpa titik/koma!</blockquote>", { parse_mode: "HTML" });
+    if (args[0].toLowerCase() === 'shared') {
+        isShared = true;
+        args.shift(); // hapus kata 'shared'
     }
 
-    // 3. UPDATE DATABASE TOKO
-    updateStore({ vps_ram: ram, vps_price: harga, vps_stock: stok });
+    if (args.length < 3) {
+        return bot.sendMessage(chatId, "<blockquote>⚠️ Format kurang lengkap!</blockquote>", { parse_mode: "HTML" });
+    }
 
-    // Beritahu admin bahwa proses broadcast sedang berjalan
-    const loadingMsg = await bot.sendMessage(chatId, "⏳ *Stok berhasil diupdate! Sedang memulai proses Broadcast ke semua user...*", { parse_mode: "Markdown" });
+    const stok = parseInt(args.pop());
+    const harga = parseInt(args.pop());
+    const ram = args.join(" ").toUpperCase(); // biar konsisten 1GB
 
-    // 4. BUAT FORMAT PESAN QUOTE
-    const botUsername = "@" + (await bot.getMe()).username; 
+    if (isNaN(harga) || isNaN(stok)) {
+        return bot.sendMessage(chatId, "<blockquote>⚠️ <b>Gagal:</b> Harga dan Stok harus angka!</blockquote>", { parse_mode: "HTML" });
+    }
 
-    let broadcastMsg = `<blockquote>🖥 <b>RESTOCK CLOUD VPS</b>\n`;
-    broadcastMsg += `━━━━━━━━━━━━━━━━━━\n\n`;
-    broadcastMsg += `Spesifikasi VPS terbaru telah tersedia! Segera amankan server Anda sebelum kehabisan.\n\n`;
-    broadcastMsg += `—\n\n`;
-    broadcastMsg += `1. <b>${ram}</b> | High Performance NVMe\n`;
-    broadcastMsg += `➥ Rp ${harga.toLocaleString('id-ID')} / Bulan\n\n`;
-    broadcastMsg += `—\n\n`;
-    broadcastMsg += `✅ <b>STOK TERSEDIA : ${stok} VPS</b>\n\n`;
-    broadcastMsg += `${botUsername}\n${botUsername}</blockquote>`;
+    // --- UPDATE DATABASE (SYNC KE INVENTORY) ---
+    const store = getStore();
+    let inventory = store.vps_inventory || { dedicated: {}, shared: {} };
+    if (!inventory.dedicated) inventory.dedicated = {};
+    if (!inventory.shared) inventory.shared = {};
 
-    // Tombol di bawah pesan broadcast agar user langsung Order
+    if (isShared) {
+        inventory.shared[ram] = { stock: stok, price: harga };
+        updateStore({ 
+            vps_shared_ram: ram, 
+            vps_shared_price: harga, 
+            vps_shared_stock: stok,
+            vps_inventory: inventory 
+        });
+    } else {
+        inventory.dedicated[ram] = { stock: stok, price: harga };
+        updateStore({ 
+            vps_ram: ram, 
+            vps_price: harga, 
+            vps_stock: stok,
+            vps_inventory: inventory
+        });
+    }
+
+    const loadingMsg = await bot.sendMessage(chatId, `⏳ Stok ${isShared ? 'VPS SHARED' : 'VPS'} berhasil diupdate! Broadcast...`, { parse_mode: "Markdown" });
+
+    // --- FORMAT BROADCAST ---
+    let broadcastMsg = "";
+    let callbackBtn = "";
+
+    if (isShared) {
+        broadcastMsg = `<blockquote>🖥 <b>RESTOCK VPS SHARED NAT</b>
+━━━━━━━━━━━━━━━━━━
+
+Spesifikasi terbaru telah tersedia!
+
+—
+1. <b>${ram}</b> | NAT VPS 
+➥ Rp ${harga.toLocaleString('id-ID')} / Bulan
+
+—
+✅ <b>STOK TERSEDIA : ${stok} VPS</b>
+
+${botUsername}
+</blockquote>`;
+        callbackBtn = "check_vps_stock"; // biar masuk ke menu yang lu mau tadi
+    } else {
+        broadcastMsg = `<blockquote>🖥 <b>RESTOCK CLOUD VPS</b>
+━━━━━━━━━━━━━━━━━━
+
+Spesifikasi VPS terbaru telah tersedia!
+
+—
+1. <b>${ram}</b> | High Performance NVMe
+➥ Rp ${harga.toLocaleString('id-ID')} / Bulan
+
+—
+✅ <b>STOK TERSEDIA : ${stok} VPS</b>
+
+${botUsername}
+</blockquote>`;
+        callbackBtn = "check_vps_stock";
+    }
+
     const broadcastOptions = {
         parse_mode: "HTML",
         reply_markup: {
             inline_keyboard: [
-                [{ text: "🛒 Beli VPS Sekarang", callback_data: "check_vps_stock", style: "success" }]
+                [{ text: isShared ? "🛒 Beli VPS Shared" : "🛒 Beli VPS Sekarang", callback_data: callbackBtn }]
             ]
         }
     };
 
-    // 5. AMBIL DATA USER DAN BROADCAST
+    // --- BROADCAST ---
     const users = getUsers(); 
     const userIds = Array.isArray(users) ? users : Object.keys(users);
-
-    // 6. LAPORAN KE ADMIN JIKA SELESAI
-    await bot.deleteMessage(chatId, loadingMsg.message_id).catch(()=>{});
-    bot.sendMessage(chatId, `<blockquote>✅ <b>BROADCAST SELESAI!</b>\n━━━━━━━━━━━━━━━━━━\nBerhasil dikirim: ${successCount} User\nGagal (Blokir Bot): ${failCount} User</blockquote>`, { parse_mode: "HTML" });
-
-
-    // 3. AMBIL SEMUA DATA USER DARI DATABASE
-    // Sesuaikan fungsi getUsers() dengan yang ada di scriptmu
-    const dbUsers = getUsers(); 
     
     let successCount = 0;
     let failCount = 0;
 
-    // 4. LOOPING PENGIRIMAN PESAN KE SEMUA USER (DENGAN JEDA)
     for (const targetId of userIds) {
-        // Opsional: Jika tidak mau admin menerima broadcast ini, aktifkan baris di bawah:
-        // if (String(targetId) === String(settings.adminId)) continue; 
-
         try {
             await bot.sendMessage(targetId, broadcastMsg, broadcastOptions);
             successCount++;
-        } catch (error) {
-            // Error biasanya terjadi jika user sudah memblokir (block) bot ini
+        } catch (e) {
             failCount++;
         }
-        
-        // JEDA 50 MILIDETIK ANTAR PESAN AGAR TIDAK KENA LIMIT TELEGRAM (SANGAT PENTING)
-        await delay(50); 
+        await new Promise(r => setTimeout(r, 50));
     }
 
-    // 5. LAPORAN KE ADMIN JIKA SELESAI
     await bot.deleteMessage(chatId, loadingMsg.message_id).catch(()=>{});
-        bot.sendMessage(chatId, `<blockquote>✅ <b>BROADCAST SELESAI!</b>\n\nBerhasil dikirim: ${successCount} User\nGagal (Blokir Bot): ${failCount} User</blockquote>`, { parse_mode: "HTML" });
+    return bot.sendMessage(chatId, `<blockquote>✅ <b>BROADCAST ${isShared ? 'VPS SHARED' : 'VPS'} SELESAI!</b>
+━━━━━━━━━━━━━━━━━━
+Jenis: ${isShared ? 'Shared' : 'Biasa'} - ${ram}
+Berhasil: ${successCount} User
+Gagal: ${failCount} User
+</blockquote>`, { parse_mode: "HTML" });
 });
 // ====================================================
 // FITUR ADMIN: LIST SEMUA USER (PAGINATION)
@@ -5561,8 +5884,8 @@ if (userSessions[chatId]?.step === "waiting_gacha_answer") {
 if (userSessions[chatId] && userSessions[chatId].step === "waiting_depo_amount") {
     const nominal = parseInt(text.replace(/\D/g, ''));
     
-    if (isNaN(nominal) || nominal < 2000) {
-    return bot.sendMessage(chatId, "❌ Minimal deposit Rp 2.000. Silakan masukkan angka kembali:");
+    if (isNaN(nominal) || nominal < 1000) {
+    return bot.sendMessage(chatId, "❌ Minimal deposit Rp 1.000. Silakan masukkan angka kembali:");
 }
 if (nominal > 100000) { // Contoh maksimal 100k
     return bot.sendMessage(chatId, "❌ Maksimal deposit adalah Rp 100.000 dalam satu transaksi.");
@@ -5587,10 +5910,10 @@ if (nominal > 100000) { // Contoh maksimal 100k
         reply_markup: {
             inline_keyboard: [
                 [
-                    { text: "⚡ 𝘘𝘳 𝘚𝘦𝘳𝘷𝘦r 1 (𝘍𝘢𝘴𝘵)", callback_data: "qr_server_1", style: "danger" },
-                    { text: "🪙 Koin Crypto", callback_data: "pay_crypto_heleket", style: "danger" }
+                    { text: "⚡ 𝘘𝘳 𝘚𝘦𝘳𝘷𝘦r 1 (𝘍𝘢𝘴𝘵)", callback_data: "pay_qris_tripay", style: "success" },
+                 //   { text: "🪙 Koin Crypto", callback_data: "pay_crypto_heleket", style: "danger" }
                 ],
-                [{ text: "𝘘𝘳 𝘚𝘦𝘳𝘷𝘦 r 2 (𝘔𝘢𝘪𝘯𝘵𝘦𝘯𝘢𝘯𝘤𝘦) ❌", callback_data: "qr_server_2", style: "danger" }],
+           //     [{ text: "𝘘𝘳 𝘚𝘦𝘳𝘷𝘦 r 2 (𝘔𝘢𝘪𝘯𝘵𝘦𝘯𝘢𝘯𝘤𝘦) ❌", callback_data: "qr_server_2", style: "danger" }],
                 [{ text: "« Batal", callback_data: "menu_profil" }]
             ]
         }
@@ -5656,12 +5979,12 @@ if (userSessions[chatId] && userSessions[chatId].step === "awaiting_username") {
                 
                 // Baris 2: Metode Pembayaran Luar (QRIS & Crypto)
                 [
-                    //{ text: "⚡ 𝘘𝘳 𝘚𝘦𝘳𝘷𝘦r 1 (𝘍𝘢𝘴𝘵)", callback_data: "qr_server_1", style: "success" },
-                    { text: "🪙 Koin Crypto", callback_data: "pay_crypto_heleket", style: "success" }
+                    { text: "⚡ 𝘘𝘳 𝘚𝘦𝘳𝘷𝘦r 1 (𝘍𝘢𝘴𝘵)", callback_data: "pay_qris_tripay", style: "success" },
+                   // { text: "🪙 Koin Crypto", callback_data: "pay_crypto_heleket", style: "success" }
                 ],
                 
                 // Baris 3: Server Maintenance & Batal
-               // [{ text: "𝘘𝘳 𝘚𝘦𝘳𝘷𝘦 r 2 (𝘔𝘢𝘪𝘯𝘵𝘦𝘯𝘢𝘯𝘤𝘦) ❌", callback_data: "qr_server_2", style: "danger" }],
+               [{ text: "𝘘𝘳 𝘚𝘦𝘳𝘷𝘦r 2 (𝘔𝘢𝘪𝘯𝘵𝘦𝘯𝘢𝘯𝘤𝘦) ❌", callback_data: "qr_server_2", style: "danger" }],
                 [{ text: "« 𝘉𝘢𝘵𝘢𝘭𝘬𝘢𝘯 𝘖𝘳𝘥𝘦𝘳", callback_data: "back_to_main" }]
             ]
         }
@@ -5683,24 +6006,41 @@ if (userSessions[chatId] && userSessions[chatId].step === "awaiting_username") {
     // ---> TAMBAHKAN INI UNTUK VPS HOSTVDS <---
     // ==========================================
     
-if (userSessions[chatId] && (userSessions[chatId].step === "awaiting_vps_name" || userSessions[chatId].step === "awaiting_hostname")) {
-    
+    if (userSessions[chatId] && (userSessions[chatId].step === "awaiting_vps_name" || userSessions[chatId].step === "awaiting_hostname")) {
+    // FIX 1: Jangan block /link, /start dll
+    if (msg.text && msg.text.startsWith('/')) return;
+
     // 1. Ambil data Saldo User dari Database
     const dbUsers = getUsers();
     const mySaldo = await getSaldoReal(chatId);
     const hargaVps = userSessions[chatId].harga;
 
-    // Bersihkan inputan
-    const cleanText = text.replace(/[^a-zA-Z0-9-]/g, "").toLowerCase();
+    // Bersihkan inputan - FIX 2: pakai msg.text bukan text
+    const cleanText = msg.text.replace(/[^a-zA-Z0-9-]/g, "").toLowerCase();
+    if (cleanText.length < 3) {
+        return bot.sendMessage(chatId, "❌ Hostname minimal 3 karakter, ketik ulang:");
+    }
 
     // Simpan data ke sesi
     userSessions[chatId].username = cleanText; 
-    userSessions[chatId].username_panel = cleanText; // Tambahkan ini agar sinkron dengan fungsi autoCreate
-    userSessions[chatId].step = "awaiting_payment";
+    userSessions[chatId].username_panel = cleanText;
+    userSessions[chatId].hostname = cleanText; // FIX buat vps_shared
     
     await bot.deleteMessage(chatId, userSessions[chatId].lastBotMessageId).catch(()=>{});
     await bot.deleteMessage(chatId, msg.message_id).catch(()=>{});
 
+    // --- CABANG KHUSUS VPS SHARED: MINTA PASSWORD CUSTOM DULU ---
+    if (userSessions[chatId].type === "vps_shared") {
+        userSessions[chatId].step = "awaiting_vps_password";
+        
+        const promptPass = await bot.sendMessage(chatId, `<blockquote>✅ <b>HOSTNAME TERSIMPAN</b>\n\n🌐 Hostname: <code>${cleanText}</code>\n📦 Produk: <b>${userSessions[chatId].paket}</b>\n\n🔑 Sekarang ketik <b>Password</b> yang kamu inginkan untuk VPS (min 8 karakter):</blockquote>`, { parse_mode: "HTML" });
+        userSessions[chatId].lastBotMessageId = promptPass.message_id;
+        return;
+    }
+
+    // --- UNTUK DEDICATED / PANEL / LAINNYA: LANGSUNG KE PAYMENT (UI TETAP) ---
+    userSessions[chatId].step = "awaiting_payment";
+    
     // 2. Susun Tombol Pembayaran (Lengkap: Saldo, QRIS, Crypto)
     const btnPayment = {
         reply_markup: {
@@ -5709,10 +6049,10 @@ if (userSessions[chatId] && (userSessions[chatId].step === "awaiting_vps_name" |
                 [{ text: `💳 Bayar Pakai Saldo (Sisa: Rp ${mySaldo.toLocaleString()})`, callback_data: "pay_via_saldo", style: "success" }],
                 
                 // Baris 2: Metode Pembayaran Luar
-               // [
-                   // { text: "⚡ QRIS", callback_data: "qr_server_1", style: "success" },
+                [
+                   { text: "⚡ QRIS Server 1 (Fast)", callback_data: "pay_qris_tripay", style: "success" }
                    // { text: "💎 Crypto", callback_data: "pay_crypto_heleket", style: "success" }
-              //  ],
+             ],
                 
                 // Baris 3: Batal
                 [{ text: "« 𝘉𝘢𝘵𝘢𝘭𝘬𝘢𝘯 𝘖𝘳𝘥𝘦𝘳", callback_data: "back_to_main" }]
@@ -5732,6 +6072,46 @@ if (userSessions[chatId] && (userSessions[chatId].step === "awaiting_vps_name" |
     await bot.sendMessage(chatId, textFinal, { parse_mode: "HTML", ...btnPayment });
     
     return; // WAJIB ADA INI
+}
+
+// --- TAMBAHAN BARU: STEP PASSWORD UNTUK VPS SHARED (TARUH TEPAT DI BAWAH BLOK DI ATAS) ---
+if (userSessions[chatId] && userSessions[chatId].step === "awaiting_vps_password") {
+    const customPassword = text.trim();
+    if (customPassword.length < 8) {
+        return bot.sendMessage(chatId, "❌ Password minimal 8 karakter, ketik ulang:");
+    }
+
+    const dbUsers = getUsers();
+    const mySaldo = await getSaldoReal(chatId);
+    const hargaVps = userSessions[chatId].harga;
+
+    userSessions[chatId].password = customPassword;
+    userSessions[chatId].step = "awaiting_payment";
+
+    await bot.deleteMessage(chatId, userSessions[chatId].lastBotMessageId).catch(()=>{});
+    await bot.deleteMessage(chatId, msg.message_id).catch(()=>{});
+
+    const btnPayment = {
+        reply_markup: {
+            inline_keyboard: [
+                [{ text: `💳 Bayar Pakai Saldo (Sisa: Rp ${mySaldo.toLocaleString()})`, callback_data: "pay_via_saldo", style: "success" }, 
+                   { text: "⚡ QRIS Server 1 (Fast)", callback_data: "pay_qris_tripay", style: "success" }
+                ],
+                [{ text: "« 𝘉𝘢𝘵𝘢𝘭𝘬𝘢𝘯 𝘖𝘳𝘥𝘦𝘳", callback_data: "back_to_main" }]
+            ]
+        }
+    };
+    
+    const textFinal = `<blockquote>✅ <b>HOSTNAME TERSIMPAN</b>\n\n` +
+                    `🌐 Hostname: <code>${userSessions[chatId].hostname}</code>\n` +
+                    `📦 Produk: <b>${userSessions[chatId].paket}</b>\n` +
+                    `💰 Harga: <b>Rp ${hargaVps.toLocaleString('id-ID')}</b>\n` +
+                    `━━━━━━━━━━━━━━━━━━\n` +
+                    `💳 Saldo Anda: <b>Rp ${mySaldo.toLocaleString('id-ID')}</b>\n\n` +
+                    `<i>Silakan pilih metode pembayaran di bawah ini:</i></blockquote>`;
+
+    await bot.sendMessage(chatId, textFinal, { parse_mode: "HTML", ...btnPayment });
+    return;
 }
     
         // ====================================================

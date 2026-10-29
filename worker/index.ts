@@ -285,6 +285,20 @@ export default {
           headers: { ...cors, "Content-Type": "application/json" }
         });
       }
+      // 4. CEK STATUS TRANSAKSI
+if (url.pathname.includes("/status")) {
+  const ref = url.searchParams.get("reference") || "";
+  if (!ref) {
+    return new Response(JSON.stringify({ success: false, message: "reference kosong" }), {
+      status: 400, headers: { ...cors, "Content-Type": "application/json" }
+    });
+  }
+  const r = await fetch("https://tripay.co.id/api/transaction/detail?reference=" + encodeURIComponent(ref), {
+    headers: { Authorization: "Bearer " + String(env.TRIPAY_API_KEY).trim() }
+  });
+  const txt = await r.text();
+  return new Response(txt, { status: r.status, headers: { ...cors, "Content-Type": "application/json" } });
+}
 // POST /api/resend/send
 if (url.pathname === "/api/resend/send") {
   if (request.method !== "POST") {
