@@ -259,6 +259,7 @@ async function potongSaldoReal(telegram_id, amount, note = "order bot") {
 //TRIPAY API WORKER
 const WORKER_TRIPAY = "https://boosteryuk.boosteryukid.workers.dev/api/tripay";
 const qrisDiproses = new Set(); // referensi yang sudah diproses (idealnya simpan ke file/DB)
+const qrisPending = new Map(); // reference -> { chatId, userId, session, amount, messageId, timer }
 
 async function buatQrisTripay({ amount, merchant_ref, customer_name }) {
     const r = await fetch(`${WORKER_TRIPAY}/create`, {
@@ -993,9 +994,10 @@ Dear All, Kini Toko VPS &amp; Panel Legal telah bekerja sama dengan Brand Digita
 
 const keyboardMenuKedua = {
     inline_keyboard: [
-            [
-            { text: "🛍 SMM Panel", callback_data: "smm", style: "success" } // Tombol ke Hal 2
-        ], 
+        [
+            { text: "🛍 SMM Panel", callback_data: "smm", style: "success" },
+            { text: "📱 𝙽𝚘𝚖𝚘𝚛 𝙾𝚃𝙿", callback_data: "menu_otp", style: "success" }
+        ],
         [
             { text: "🛍 𝙱𝚎𝚕𝚒 𝚅𝚙𝚜", callback_data: "menu_vps", style: "success" },
             { text: "🛍 𝙱𝚎𝚕𝚒 𝙿𝚊𝚗𝚎𝚕", callback_data: "menu_panel", style: "success" }
@@ -1173,6 +1175,8 @@ async function autoCreatePanelTimed(chatId, namaPaket, durasiJam, isTrial = fals
     } catch (error) {
         console.error("DEBUG ERROR:", error.message);
         bot.sendMessage(chatId, `⚠️ <b>ᴛᴇʀᴊᴀᴅɪ ᴋᴇꜱᴀʟᴀʜᴀɴ:</b> ${error.message}\n\n<i>Hubungi Admin</i>`, { parse_mode: "HTML" });
+        // Rental berbayar: lempar lagi biar ke-refund di pay_via_saldo / QRIS 1
+        if (!isTrial) throw error;
     }
 }
 // ====================================================
@@ -1633,7 +1637,19 @@ async function handlePaymentSuccess(chatId, session, orderId, messageId = null) 
     try {
         // --- 1. JIKA USER DEPOSIT ---
         if (session.type === "deposit") {
-            const saldoBaru = updateSaldo(chatId, session.amount);
+            // Saldo yang dipakai bayar ada di website (getSaldoReal / potongSaldoReal),
+            // jadi deposit dikreditkan ke sana. updateSaldo lokal akan tertimpa getSaldoReal.
+            const kredit = await refundSaldoReal(chatId, session.amount, `Deposit ${orderId}`).catch(e => ({ status: false, msg: e.message }));
+            if (!kredit || !kredit.status) {
+                // Jangan throw: catch pemanggil akan refund lagi ke endpoint yang sama (risiko kredit ganda)
+                const alasan = (kredit && (kredit.msg || kredit.message)) || "tidak diketahui";
+                bot.sendMessage(chatId, `⚠️ Pembayaran deposit diterima, tapi saldo belum bisa ditambahkan otomatis.\nAdmin akan memprosesnya manual. Simpan Order ID: <code>${orderId}</code>`, { parse_mode: "HTML" }).catch(() => {});
+                bot.sendMessage(settings.adminId, `<blockquote>⚠️ <b>DEPOSIT LUNAS, KREDIT SALDO GAGAL</b>\n━━━━━━━━━━━━━━━━━━\n🆔 ID: <code>${chatId}</code>\n💵 Nominal: Rp ${parseInt(session.amount).toLocaleString()}\n🧾 Order ID: <code>${orderId}</code>\n❗ ${alasan}</blockquote>`, { parse_mode: "HTML" }).catch(() => {});
+                delete userSessions[chatId];
+                return;
+            }
+            const saldoBaru = Number(kredit.new_balance) || 0;
+            if (global.dbUsers && global.dbUsers[chatId]) global.dbUsers[chatId].saldo = saldoBaru;
             const textSukses = `<blockquote>✅ <b>DEPOSIT BERHASIL!</b>\n\n` +
                              `💰 Saldo Masuk: <b>Rp ${parseInt(session.amount).toLocaleString()}</b>\n` +
                              `💳 Total Saldo: <b>Rp ${saldoBaru.toLocaleString()}</b>\n\n` +
@@ -1721,7 +1737,7 @@ async function handlePaymentSuccess(chatId, session, orderId, messageId = null) 
         // --- 4. JIKA VPS BARU ---
                 // --- 4. JIKA VPS BARU ---
                 // --- 4. JIKA VPS BARU ---
-        else if (session.type === "vps_shared" || session.type === "vps_dedicated" || String(session.type).startsWith("vps_")) {
+        else if (session.type === "vps" || session.type === "vps_shared" || session.type === "vps_dedicated" || String(session.type).startsWith("vps_")) {
             const textSukses = `<blockquote>🎉 <b>PEMBAYARAN SUKSES!</b>\n\nVPS Anda sedang dideploy otomatis...</blockquote>`;
             if (messageId) await bot.editMessageCaption(textSukses, { chat_id: chatId, message_id: messageId, parse_mode: "HTML" }).catch(() => {});
             else bot.sendMessage(chatId, textSukses, { parse_mode: "HTML" });
@@ -1755,7 +1771,16 @@ async function handlePaymentSuccess(chatId, session, orderId, messageId = null) 
             await autoCreatePanel(chatId, session.username, session.paket);
             bot.sendMessage(settings.adminId, `<blockquote>📦 <b>INCOME: PANEL BARU</b>\n━━━━━━━━━━━━━━━━━━\n🆔 ID: <code>${chatId}</code>\n👤 User: <code>${session.username}</code>\n🧾 Order ID: <code>${orderId}</code></blockquote>`, { parse_mode: "HTML" });
         }
-        // --- 7. SAFETY: KALAU TYPE GAK DIKENAL JANGAN PAKSA JADI PANEL ---
+        // --- 7. RENTAL PANEL PER JAM ---
+        else if (session.type === "hourly") {
+            const textSukses = `<blockquote>🎉 <b>PEMBAYARAN SUKSES!</b>\n\nPanel rental ${session.jam} jam Anda sedang dibuat...</blockquote>`;
+            if (messageId) await bot.editMessageCaption(textSukses, { chat_id: chatId, message_id: messageId, parse_mode: "HTML" }).catch(() => {});
+            else bot.sendMessage(chatId, textSukses, { parse_mode: "HTML" });
+
+            await autoCreatePanelTimed(chatId, session.paket, session.jam);
+            bot.sendMessage(settings.adminId, `<blockquote>🕒 <b>INCOME: RENTAL PANEL</b>\n━━━━━━━━━━━━━━━━━━\n🆔 ID: <code>${chatId}</code>\n⏳ Durasi: ${session.jam} Jam\n🧾 Order ID: <code>${orderId}</code></blockquote>`, { parse_mode: "HTML" });
+        }
+        // --- 8. SAFETY: KALAU TYPE GAK DIKENAL JANGAN PAKSA JADI PANEL ---
         else {
             throw new Error(`Tipe order tidak dikenal: ${session.type} | paket: ${session.paket}`);
         }
@@ -1767,6 +1792,39 @@ async function handlePaymentSuccess(chatId, session, orderId, messageId = null) 
         bot.sendMessage(settings.adminId, `⚠️ <b>ERROR HANDLER:</b> ${e.message}`).catch(()=>{});
         // FIX: LEMPAR LAGI BIAR DI pay_via_saldo KETRIGGER REFUND
         throw e;
+    }
+}
+
+// ====================================================
+// QRIS 1 (FAST / TRIPAY): PROSES ORDER SETELAH LUNAS
+// ====================================================
+// Dipanggil oleh timer otomatis & tombol "CEK STATUS". Diteruskan ke handlePaymentSuccess,
+// jadi autoCreatePanel / autoCreateVPS / autoCreateVPSShared / autoCreatePanelTimed / deposit /
+// extend / patungan / jasa_install jalan sesuai session.type.
+async function selesaikanQrisTripay(reference) {
+    const order = qrisPending.get(reference);
+    if (!order || qrisDiproses.has(reference)) return; // cegah proses ganda
+    qrisDiproses.add(reference);
+    clearInterval(order.timer);
+    qrisPending.delete(reference);
+
+    const { chatId, userId, session, amount, messageId } = order;
+    await bot.deleteMessage(chatId, messageId).catch(() => {});
+    await bot.sendMessage(chatId, `✅ <b>Pembayaran berhasil!</b>\nReferensi: <code>${reference}</code>\n\n⏳ Memproses pesanan...`, { parse_mode: "HTML" }).catch(() => {});
+
+    try {
+        await handlePaymentSuccess(chatId, session, reference);
+    } catch (err) {
+        // Dana QRIS sudah masuk, jadi kalau eksekusi gagal kembalikan ke saldo akun
+        console.error(`[QRIS1] Gagal ${reference} type=${session.type} paket=${session.paket}:`, err.message);
+        const refund = await refundSaldoReal(userId, amount, `Gagal eksekusi ${reference} - ${err.message}`).catch(e => ({ status: false, msg: e.message }));
+
+        if (refund.status) {
+            await bot.sendMessage(chatId, `❌ Order gagal (${err.message}), dana Rp ${amount.toLocaleString()} sudah dimasukkan ke saldo akun.\nSisa saldo: Rp ${refund.new_balance.toLocaleString()}`);
+        } else {
+            await bot.sendMessage(chatId, `❌ FATAL: Order gagal & refund gagal! Hubungi admin dengan referensi ${reference}.\nError: ${err.message} | Refund: ${refund.msg}`);
+        }
+        bot.sendMessage(settings.adminId, `⚠️ <b>QRIS 1 LUNAS TAPI ORDER GAGAL</b>\n🆔 ID: <code>${chatId}</code>\n🧾 Ref: <code>${reference}</code>\n💵 Rp ${amount.toLocaleString()}\n❗ ${err.message}\n↩️ Refund saldo: ${refund.status ? "BERHASIL" : "GAGAL"}`, { parse_mode: "HTML" }).catch(() => {});
     }
 }
 // ====================================================
@@ -2590,6 +2648,33 @@ if (query.data.startsWith('do_')) {
         // BAGIAN 1: LOGIKA "IF" UNTUK DATA DINAMIS
         // ====================================================
         
+        // CEK STATUS QRIS 1 (FAST / TRIPAY) - TOMBOL MANUAL
+        if (query.data.startsWith("cek_qris_")) {
+            const reference = query.data.replace("cek_qris_", "");
+
+            if (qrisDiproses.has(reference)) {
+                return bot.answerCallbackQuery(query.id, { text: "✅ Pembayaran ini sudah diproses.", show_alert: true });
+            }
+            if (!qrisPending.has(reference)) {
+                return bot.answerCallbackQuery(query.id, { text: "Data order tidak ditemukan / QRIS kedaluwarsa. Silakan order ulang.", show_alert: true });
+            }
+
+            try {
+                const st = await statusTripay(reference);
+                const s = st && st.data && st.data.status;
+
+                if (s === "PAID") {
+                    await bot.answerCallbackQuery(query.id, { text: "✅ Pembayaran SUKSES! Memproses Pesanan...", show_alert: true });
+                    await selesaikanQrisTripay(reference); // -> handlePaymentSuccess
+                } else {
+                    await bot.answerCallbackQuery(query.id, { text: "⏳ Belum lunas. Silakan bayar dulu ya!", show_alert: true });
+                }
+            } catch (err) {
+                bot.answerCallbackQuery(query.id, { text: "Gagal mengecek status.", show_alert: true });
+            }
+            return;
+        }
+
         if (query.data.startsWith("check_pay_")) {
     const invoiceUuid = query.data.replace("check_pay_", "");
     const userId = query.from.id;
@@ -2898,7 +2983,7 @@ if (data.startsWith("ext_")) {
                     [{ text: `💳 Bayar Pakai Saldo (Rp ${mySaldo.toLocaleString()})`, callback_data: "pay_via_saldo", style: "success" }],
                     // Metode Luar
                     [
-                    //    { text: "⚡ QRIS FAST", callback_data: "qr_server_1" },
+                        { text: "⚡ QRIS FAST", callback_data: "pay_qris_tripay", style: "success" },
                         { text: "🪙 Koin Crypto", callback_data: "pay_crypto_heleket" }
                     ],
                     [{ text: "« Batal", callback_data: `ext_ui_${srvIndex}_${days}` }]
@@ -2965,6 +3050,7 @@ if (data.startsWith("ext_")) {
 
             // Simpan data ke sesi sementara
             userSessions[chatId] = {
+                type: "panel", // WAJIB: tanpa ini handlePaymentSuccess menolak order
                 step: "awaiting_username",
                 paket: detailPaket,
                 harga: harga, // Yang disimpan harga asli, Pakasir akan otomatis nambahin fee-nya nanti
@@ -3193,21 +3279,20 @@ const textMenuLainnya = `<blockquote>( 👋 ) - <b>ʜᴀʟᴏ ꜱᴇʟᴀᴍᴀ�
 
     const keyboardMenuLainnya = {
         inline_keyboard: [
+            // Pola sama dengan menu utama: baris berisi 2 tombol, lalu tombol lebar di bawah
             [
-                { text: "🤝 𝙿𝚊𝚝𝚞𝚗𝚐𝚊𝚗 𝚅𝚙𝚜", callback_data: "menu_patungan", style: "success" }
-            ],
-            [{ text: "💈 𝙸𝚗𝚜𝚝𝚊𝚕𝚕 𝚅𝚙𝚜", callback_data: "menu_autoinstall", style: "success" }],
-            [
-                { text: "🎮 𝚁𝚎𝚗𝚝𝚊𝚕 𝙿𝚊𝚗𝚎𝚕", callback_data: "menu_hourly", style: "success" }
+                { text: "🤝 𝙿𝚊𝚝𝚞𝚗𝚐𝚊𝚗 𝚅𝚙𝚜", callback_data: "menu_patungan", style: "success" },
+                { text: "💈 𝙸𝚗𝚜𝚝𝚊𝚕𝚕 𝚅𝚙𝚜", callback_data: "menu_autoinstall", style: "success" }
             ],
             [
+                { text: "🎮 𝚁𝚎𝚗𝚝𝚊𝚕 𝙿𝚊𝚗𝚎𝚕", callback_data: "menu_hourly", style: "success" },
                 { text: "🐿 𝙰𝚍𝚘𝚙𝚜𝚒 𝙿𝚎𝚝", callback_data: "menu_pet", style: "success" }
             ],
             [
-                { text: "💸 Freelance", callback_data: "menu_freelance", style: "success" }
+                { text: "💸 𝙵𝚛𝚎𝚎𝚕𝚊𝚗𝚌𝚎", callback_data: "menu_freelance", style: "success" }
             ],
             [
-                { text: "𝙺𝚎𝚖𝚋𝚊𝚕𝚒", callback_data: "back_to_main" } // ID Sesuai permintaanmu
+                { text: "⬅️ 𝙺𝚎𝚖𝚋𝚊𝚕𝚒", callback_data: "back_to_main" }
             ]
         ]
     };
@@ -3231,10 +3316,17 @@ const textMenuLainnya = `<blockquote>( 👋 ) - <b>ʜᴀʟᴏ ꜱᴇʟᴀᴍᴀ�
 }
 case "pay_qris_tripay": {
     const userId = query.from.id;
-    const session = userSessions[userId];
+    const chatIdOrder = query.message ? query.message.chat.id : userId;
+    // Cek 2 key biar gak hilang sesi (sama seperti pay_via_saldo)
+    const session = userSessions[userId] || userSessions[chatIdOrder];
+    const tipeDikenal = ["deposit", "extend", "patungan", "jasa_install", "panel", "hourly", "vps"];
 
     if (!session || !session.harga) {
         return bot.answerCallbackQuery(query.id, { text: "⚠️ Harga tidak ditemukan, Silakan order ulang.", show_alert: true });
+    }
+    // Jangan sampai user bayar untuk order yang nanti tidak bisa dieksekusi handlePaymentSuccess
+    if (!tipeDikenal.includes(session.type) && !String(session.type).startsWith("vps_")) {
+        return bot.answerCallbackQuery(query.id, { text: "⚠️ Sesi order tidak valid, Silakan order ulang.", show_alert: true });
     }
     bot.answerCallbackQuery(query.id, { text: "Membuat QRIS..." }).catch(() => {});
 
@@ -3245,8 +3337,9 @@ case "pay_qris_tripay": {
         const res = await buatQrisTripay({ amount, merchant_ref: ref, customer_name: query.from.first_name || "User" });
         if (!res.success) {
             console.log("QRIS 1 gagal:", JSON.stringify(res));
-            return bot.sendMessage(userId, "⚠️ Gagal membuat QRIS: " + (res.message || "coba lagi nanti."));
+            return bot.sendMessage(chatIdOrder, "⚠️ Gagal membuat QRIS: " + (res.message || "coba lagi nanti."));
         }
+        if (messageId) await bot.deleteMessage(chatIdOrder, messageId).catch(() => {});
 
         const d = res.data;
         const caption = `💳 <b>PEMBAYARAN QRIS</b>\n\n💵 Total: <b>Rp ${Number(d.amount).toLocaleString("id-ID")}</b>\n🆔 Referensi: <code>${d.reference}</code>\n\n<i>Scan QR di atas dengan e-wallet atau m-banking. Berlaku 30 menit.</i>`;
@@ -3262,37 +3355,43 @@ case "pay_qris_tripay": {
         let sent;
         if (d.qr_string) {
             const buf = await QRCode.toBuffer(d.qr_string, { width: 600, margin: 2 });
-            sent = await bot.sendPhoto(userId, buf, { caption, parse_mode: "HTML", ...kb }, { filename: "qris.png", contentType: "image/png" });
+            sent = await bot.sendPhoto(chatIdOrder, buf, { caption, parse_mode: "HTML", ...kb }, { filename: "qris.png", contentType: "image/png" });
         } else {
-            sent = await bot.sendPhoto(userId, d.qr_url, { caption, parse_mode: "HTML", ...kb });
+            sent = await bot.sendPhoto(chatIdOrder, d.qr_url, { caption, parse_mode: "HTML", ...kb });
         }
+
+        // Salin sesi saat QRIS dibuat, biar order tetap benar walau user buka menu lain
+        const order = {
+            chatId: chatIdOrder,
+            userId,
+            session: { ...session, orderId: d.reference },
+            amount,
+            messageId: sent.message_id,
+            timer: null
+        };
+        qrisPending.set(d.reference, order);
 
         // Pantau status tiap 5 detik, maksimal 30 menit
         let n = 0;
-        const timer = setInterval(async () => {
+        order.timer = setInterval(async () => {
             n++;
             try {
                 const st = await statusTripay(d.reference);
                 const s = st && st.data && st.data.status;
 
                 if (s === "PAID") {
-                    clearInterval(timer);
-                    if (qrisDiproses.has(d.reference)) return; // cegah proses ganda
-                    qrisDiproses.add(d.reference);
-
-                    await bot.deleteMessage(userId, sent.message_id).catch(() => {});
-                    bot.sendMessage(userId, `✅ <b>Pembayaran berhasil!</b>\nReferensi: <code>${d.reference}</code>`, { parse_mode: "HTML" });
-                    // TODO: lanjutkan proses order di sini (buat panel / VPS)
-                } else if (s === "EXPIRED" || s === "FAILED" || n >= 360) {
-                    clearInterval(timer);
-                    bot.sendMessage(userId, "⌛ QRIS kedaluwarsa atau gagal. Silakan order ulang.");
+                    await selesaikanQrisTripay(d.reference); // -> handlePaymentSuccess
+                } else if (s === "EXPIRED" || s === "FAILED" || n >= 372) { // 31 menit: sedikit lewat masa QR 30 menit
+                    clearInterval(order.timer);
+                    qrisPending.delete(d.reference);
+                    bot.sendMessage(chatIdOrder, "⌛ QRIS kedaluwarsa atau gagal. Silakan order ulang.");
                 }
             } catch (e) { /* coba lagi di putaran berikutnya */ }
         }, 5000);
 
     } catch (e) {
         console.log("QRIS error:", e.message);
-        bot.sendMessage(userId, "⚠️ Terjadi kesalahan saat membuat QRIS.");
+        bot.sendMessage(chatIdOrder, "⚠️ Terjadi kesalahan saat membuat QRIS.");
     }
     break;
 }
@@ -3471,10 +3570,10 @@ case "p_dur_168": {
     userSessions[chatId].durasi = jam;
     userSessions[chatId].roomId = "R" + Date.now(); // Room baru karena dia CEO
     
-    // Langsung panggil QRIS
+    // Langsung panggil QRIS 1 (Fast)
     return bot.answerCallbackQuery(query.id, { text: "Mengarahkan ke pembayaran..." }).then(() => {
-        // Trigger manual ke case qr_server_1
-        bot.emit('callback_query', { ...query, data: 'qr_server_1' });
+        // Trigger manual ke case pay_qris_tripay
+        bot.emit('callback_query', { ...query, data: 'pay_qris_tripay' });
     });
     break;
 }
@@ -5682,7 +5781,7 @@ bot.on('voice', async (msg) => {
         if (text.includes("saldo")) {
             method = "pay_via_saldo"; methodLabel = "Saldo Akun";
         } else if (text.includes("qris")) {
-            method = "qr_server_1"; methodLabel = "QRIS (Fast)";
+            method = "pay_qris_tripay"; methodLabel = "QRIS (Fast)";
         } else if (text.includes("crypto") || text.includes("kripto")) {
             method = "pay_crypto_heleket"; methodLabel = "Crypto";
         }
@@ -5804,7 +5903,7 @@ if (session && session.step === "input_hour") {
     
     bot.sendMessage(chatId, textKonfirmasi, { 
         parse_mode: "HTML", 
-        reply_markup: { inline_keyboard: [[{ text: "✅ Bayar Sekarang", callback_data: "qr_server_1", style: "danger" }]] } 
+        reply_markup: { inline_keyboard: [[{ text: "✅ Bayar Sekarang (QRIS Fast)", callback_data: "pay_qris_tripay", style: "danger" }]] }
     });
 }
 if (session && session.step === "input_patungan_slot") {
@@ -6206,157 +6305,640 @@ bot.onText(/^\/pm (\d+) (.+)/, async (msg, match) => {
         bot.sendMessage(chatId, `❌ *Gagal!* Pastikan ID benar dan user belum memblokir bot.`);
     }
 });
+// ====================================================
+// FITUR NOMOR OTP (HEROSMS - PROTOKOL SMS-ACTIVATE)
+// ====================================================
+// Alur: menu_otp -> pilih layanan -> pilih negara -> konfirmasi -> bayar saldo website
+//       -> getNumberV2 -> pantau getStatus -> kirim kode ke user.
+// Belum dapat kode lalu batal / waktu habis => saldo dikembalikan (refundSaldoReal).
+// Konfigurasi di settings.herosms (apiKey, kurs, markup, layanan). Kalau apiKey kosong, menu tampil "belum aktif".
+const OTP_DB_FILE = "./database/otp_orders.json";
+const otpOrders = new Map();      // activationId -> order
+const otpBeliLock = new Set();    // userId yang sedang proses beli (anti double klik)
+const otpCache = {};              // { countries: {at, data}, services: {at, data} }
+
+const OTP_LAYANAN_DEFAULT = [
+    { code: "wa", name: "WhatsApp" }, { code: "tg", name: "Telegram" },
+    { code: "ig", name: "Instagram" }, { code: "fb", name: "Facebook" },
+    { code: "go", name: "Google/Gmail" }, { code: "lf", name: "TikTok" },
+    { code: "tw", name: "Twitter/X" }, { code: "ds", name: "Discord" }
+];
+
+function otpCfg() {
+    const c = settings.herosms || {};
+    return {
+        apiKey: String(c.apiKey || process.env.HEROSMS_API_KEY || "").trim(),
+        baseUrl: c.baseUrl || "https://hero-sms.com/stubs/handler_api.php",
+        kurs: Number(c.kurs) || 17000,                 // 1 USD (mata uang akun HeroSMS) = Rp
+        markupPersen: c.markupPersen ?? 20,            // keuntungan %
+        markupMin: c.markupMin ?? 1000,                // keuntungan minimal Rp
+        maxNegara: c.maxNegara || 10,                  // jumlah negara termurah yang ditampilkan
+        negaraUtama: c.negaraUtama ?? 6,               // 6 = Indonesia, selalu di paling atas
+        intervalCek: c.intervalCek || 5000,
+        layanan: Array.isArray(c.layanan) && c.layanan.length ? c.layanan : OTP_LAYANAN_DEFAULT
+    };
+}
+
+async function heroApi(action, params = {}) {
+    const cfg = otpCfg();
+    if (!cfg.apiKey) throw new Error("API key HeroSMS belum diatur");
+    const qs = new URLSearchParams({ api_key: cfg.apiKey, action, ...params });
+    const r = await fetch(`${cfg.baseUrl}?${qs.toString()}`, { signal: AbortSignal.timeout(20000) });
+    const txt = (await r.text()).trim();
+    try { return JSON.parse(txt); } catch { return txt; }
+}
+
+// Kode error HeroSMS: teks ("NO_NUMBERS", "BAD_KEY") atau JSON { title, details, info }
+function heroErr(res) {
+    if (res && typeof res === "object" && !Array.isArray(res) && res.title) return res.title;
+    if (typeof res === "string" && !/^(ACCESS_|STATUS_)/.test(res)) return res.split(":")[0] || "UNKNOWN";
+    return null;
+}
+
+const OTP_ERR_TEKS = {
+    NO_NUMBERS: "Nomor untuk layanan & negara ini sedang habis. Coba negara lain.",
+    NO_BALANCE: "Stok server OTP sedang kosong. Admin sudah diberi tahu, coba lagi nanti.",
+    BAD_KEY: "Konfigurasi server OTP bermasalah. Admin sudah diberi tahu.",
+    NO_KEY: "Konfigurasi server OTP bermasalah. Admin sudah diberi tahu.",
+    WRONG_MAX_PRICE: "Harga baru saja naik. Silakan pilih negara lagi untuk melihat harga terbaru.",
+    CHANNELS_LIMIT: "Server OTP sedang penuh. Coba lagi beberapa menit lagi.",
+    BAD_SERVICE: "Layanan tidak valid.",
+    BANNED: "Server OTP sedang dibatasi. Coba lagi nanti."
+};
+
+function otpHarga(cost) {
+    const cfg = otpCfg();
+    const modal = Number(cost) * cfg.kurs;
+    const jual = Math.max(modal * (1 + cfg.markupPersen / 100), modal + cfg.markupMin);
+    return Math.ceil(jual / 100) * 100;
+}
+
+const otpRp = n => `Rp ${Number(n).toLocaleString("id-ID")}`;
+
+async function otpCached(key, loader, ttlMs = 6 * 3600 * 1000) {
+    const c = otpCache[key];
+    if (c && Date.now() - c.at < ttlMs) return c.data;
+    const data = await loader();
+    otpCache[key] = { at: Date.now(), data };
+    return data;
+}
+
+async function otpNegaraMap() {
+    return otpCached("countries", async () => {
+        const res = await heroApi("getCountries");
+        if (heroErr(res)) throw new Error(heroErr(res));
+        const list = Array.isArray(res) ? res : Object.values(res || {});
+        const map = {};
+        for (const c of list) if (c && c.id !== undefined) map[String(c.id)] = c.eng || c.rus || `Negara ${c.id}`;
+        return map;
+    });
+}
+
+async function otpDaftarLayanan() {
+    return otpCached("services", async () => {
+        const res = await heroApi("getServicesList", { lang: "en" });
+        if (heroErr(res)) throw new Error(heroErr(res));
+        return (res && res.services) || [];
+    });
+}
+
+async function otpNamaLayanan(code) {
+    const lokal = otpCfg().layanan.find(l => l.code === code);
+    if (lokal) return lokal.name;
+    const semua = await otpDaftarLayanan().catch(() => []);
+    return (semua.find(s => s.code === code) || {}).name || code.toUpperCase();
+}
+
+// -> [{ country, cost, count }] untuk satu layanan (stok > 0)
+async function otpHargaPerNegara(service, country) {
+    const params = { service };
+    if (country !== undefined) params.country = country;
+    const res = await heroApi("getPrices", params);
+    if (heroErr(res)) throw new Error(heroErr(res));
+    const byCountry = Array.isArray(res) ? Object.assign({}, ...res) : (res || {});
+    const out = [];
+    for (const [cty, svcs] of Object.entries(byCountry)) {
+        const p = svcs && svcs[service];
+        if (p && Number(p.count) > 0) out.push({ country: cty, cost: Number(p.cost), count: Number(p.count) });
+    }
+    return out;
+}
+
+function otpSimpan() {
+    try {
+        const data = [...otpOrders.values()].map(({ timer, busy, ...o }) => o);
+        fs.writeFileSync(OTP_DB_FILE, JSON.stringify(data, null, 2));
+    } catch (e) { console.log("[OTP] gagal simpan:", e.message); }
+}
+
+function otpKeyboard(o) {
+    if (o.codes.length) {
+        return { inline_keyboard: [
+            [{ text: "🔁 Minta SMS Lagi", callback_data: `otp_r_${o.id}` }, { text: "✅ Selesai", callback_data: `otp_f_${o.id}`, style: "success" }]
+        ] };
+    }
+    return { inline_keyboard: [
+        [{ text: "🔄 Cek SMS", callback_data: `otp_k_${o.id}`, style: "success" }, { text: "❌ Batalkan", callback_data: `otp_x_${o.id}`, style: "danger" }]
+    ] };
+}
+
+function otpTeksOrder(o) {
+    const kode = o.codes.length
+        ? `\n\n🔑 <b>Kode OTP:</b> <code>${o.codes[o.codes.length - 1]}</code>` + (o.codes.length > 1 ? `\n<i>Kode sebelumnya: ${o.codes.slice(0, -1).join(", ")}</i>` : "")
+        : `\n\n⏳ <i>Menunggu SMS masuk... (cek otomatis tiap ${Math.round(otpCfg().intervalCek / 1000)} detik)</i>`;
+    const batas = new Date(o.endTime).toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit" });
+    return `<blockquote>📱 <b>NOMOR OTP</b>\n━━━━━━━━━━━━━━━━━━\n` +
+        `🧩 Layanan: <b>${o.serviceName}</b>\n🌍 Negara: ${o.countryName}\n` +
+        `📞 Nomor: <code>+${o.phone}</code>\n💵 Harga: ${otpRp(o.harga)}\n🆔 ID: <code>${o.id}</code>\n⌛ Berlaku s/d: ${batas} WIB` +
+        kode + `</blockquote>`;
+}
+
+async function otpUpdatePesan(o) {
+    await bot.editMessageText(otpTeksOrder(o), { chat_id: o.chatId, message_id: o.messageId, parse_mode: "HTML", reply_markup: otpKeyboard(o) }).catch(() => {});
+}
+
+// Kembalikan saldo sekali saja per order
+async function otpRefund(o, alasan) {
+    if (o.refunded) return;
+    o.refunded = true;
+    otpSimpan();
+    const r = await refundSaldoReal(o.userId, o.harga, `Refund OTP ${o.id} - ${alasan}`).catch(e => ({ status: false, msg: e.message }));
+    if (r && r.status) {
+        bot.sendMessage(o.chatId, `↩️ Saldo ${otpRp(o.harga)} dikembalikan (${alasan}).\nSisa saldo: ${otpRp(r.new_balance || 0)}`).catch(() => {});
+    } else {
+        bot.sendMessage(o.chatId, `⚠️ Refund otomatis gagal. Admin akan memproses manual. ID: ${o.id}`).catch(() => {});
+        bot.sendMessage(settings.adminId, `<blockquote>⚠️ <b>REFUND OTP GAGAL</b>\n🆔 User: <code>${o.userId}</code>\n🧾 Aktivasi: <code>${o.id}</code>\n💵 ${otpRp(o.harga)}\n❗ ${(r && (r.msg || r.message)) || "-"}</blockquote>`, { parse_mode: "HTML" }).catch(() => {});
+    }
+}
+
+function otpSelesai(o, status) {
+    clearInterval(o.timer);
+    o.status = status;
+    otpOrders.delete(o.id);
+    otpSimpan();
+}
+
+// Satu putaran cek status. Dipakai timer & tombol "Cek SMS".
+async function otpCekStatus(o) {
+    if (o.busy || !otpOrders.has(o.id)) return;
+    o.busy = true;
+    try {
+        if (Date.now() > o.endTime) {
+            if (o.codes.length) {
+                await heroApi("setStatus", { id: o.id, status: 6 }).catch(() => {});
+                otpSelesai(o, "DONE");
+            } else {
+                await heroApi("setStatus", { id: o.id, status: 8 }).catch(() => {});
+                otpSelesai(o, "EXPIRED");
+                await bot.editMessageText(otpTeksOrder(o) + "\n⌛ <b>Waktu habis, SMS tidak masuk.</b>", { chat_id: o.chatId, message_id: o.messageId, parse_mode: "HTML" }).catch(() => {});
+                await otpRefund(o, "SMS tidak masuk");
+            }
+            return;
+        }
+
+        const res = await heroApi("getStatus", { id: o.id });
+        if (typeof res !== "string") return;
+
+        if (res.startsWith("STATUS_OK:")) {
+            const kode = res.slice("STATUS_OK:".length);
+            if (!o.codes.includes(kode)) {
+                o.codes.push(kode);
+                o.status = "CODE";
+                clearInterval(o.timer); // berhenti sampai user minta SMS lagi
+                otpSimpan();
+                await otpUpdatePesan(o);
+                bot.sendMessage(o.chatId, `🔑 Kode OTP ${o.serviceName}: <code>${kode}</code>`, { parse_mode: "HTML" }).catch(() => {});
+            }
+        } else if (res === "STATUS_CANCEL") {
+            otpSelesai(o, "CANCEL");
+            if (!o.codes.length) {
+                await bot.editMessageText(otpTeksOrder(o) + "\n❌ <b>Aktivasi dibatalkan.</b>", { chat_id: o.chatId, message_id: o.messageId, parse_mode: "HTML" }).catch(() => {});
+                await otpRefund(o, "aktivasi dibatalkan");
+            }
+        }
+        // STATUS_WAIT_CODE / STATUS_WAIT_RETRY / STATUS_WAIT_RESEND: tunggu putaran berikutnya
+    } catch (e) {
+        console.log(`[OTP] cek ${o.id} gagal:`, e.message);
+    } finally {
+        o.busy = false;
+    }
+}
+
+function otpMulaiPantau(o) {
+    clearInterval(o.timer);
+    o.timer = setInterval(() => otpCekStatus(o), otpCfg().intervalCek);
+}
+
+// Lanjutkan order yang masih jalan setelah bot restart
+try {
+    if (fs.existsSync(OTP_DB_FILE)) {
+        for (const o of JSON.parse(fs.readFileSync(OTP_DB_FILE, "utf8")) || []) {
+            otpOrders.set(o.id, o);
+            if (o.status === "WAIT") otpMulaiPantau(o);
+        }
+    }
+} catch (e) { console.log("[OTP] gagal memuat order:", e.message); }
+
+async function otpTampilMenu(chatId, messageId) {
+    const cfg = otpCfg();
+    if (!cfg.apiKey) {
+        return bot.sendMessage(chatId, "<blockquote>📱 <b>NOMOR OTP</b>\n\nFitur ini segera hadir. Pantau terus ya!</blockquote>", {
+            parse_mode: "HTML", reply_markup: { inline_keyboard: [[{ text: "⬅️ Kembali", callback_data: "back_to_main" }]] }
+        });
+    }
+    const tombol = cfg.layanan.map(l => ({ text: l.name, callback_data: `otp_s_${l.code}` }));
+    const baris = [];
+    for (let i = 0; i < tombol.length; i += 2) baris.push(tombol.slice(i, i + 2));
+    baris.push([{ text: "🔎 Cari Layanan Lain", callback_data: "otp_cari", style: "primary" }, { text: "📜 Pesanan Aktif", callback_data: "otp_aktif", style: "primary" }]);
+    baris.push([{ text: "⬅️ Kembali", callback_data: "back_to_main" }]);
+
+    const teks = `<blockquote>📱 <b>NOMOR OTP / VERIFIKASI</b>\n━━━━━━━━━━━━━━━━━━\n` +
+        `Nomor virtual untuk menerima kode verifikasi (WhatsApp, Telegram, dll).\n\n` +
+        `1️⃣ Pilih layanan\n2️⃣ Pilih negara\n3️⃣ Bayar pakai saldo\n4️⃣ Pakai nomor, kode OTP dikirim otomatis\n\n` +
+        `<i>SMS tidak masuk? Batalkan, saldo kembali utuh.</i></blockquote>`;
+    if (messageId) await bot.deleteMessage(chatId, messageId).catch(() => {});
+    return bot.sendMessage(chatId, teks, { parse_mode: "HTML", reply_markup: { inline_keyboard: baris } });
+}
+
+async function otpPilihNegara(chatId, messageId, service) {
+    const cfg = otpCfg();
+    const [harga, negara, nama] = await Promise.all([otpHargaPerNegara(service), otpNegaraMap(), otpNamaLayanan(service)]);
+    if (!harga.length) {
+        return bot.editMessageText(`<blockquote>😔 Stok nomor <b>${nama}</b> sedang kosong di semua negara.</blockquote>`, {
+            chat_id: chatId, message_id: messageId, parse_mode: "HTML",
+            reply_markup: { inline_keyboard: [[{ text: "⬅️ Kembali", callback_data: "menu_otp" }]] }
+        });
+    }
+    harga.sort((a, b) => a.cost - b.cost);
+    const utama = harga.find(h => String(h.country) === String(cfg.negaraUtama));
+    const daftar = [utama, ...harga.filter(h => h !== utama)].filter(Boolean).slice(0, cfg.maxNegara);
+
+    const baris = daftar.map(h => [{
+        text: `${negara[h.country] || "Negara " + h.country} • ${otpRp(otpHarga(h.cost))} (${h.count})`,
+        callback_data: `otp_c_${service}_${h.country}`
+    }]);
+    baris.push([{ text: "⬅️ Kembali", callback_data: "menu_otp" }]);
+
+    const teks = `<blockquote>🌍 <b>PILIH NEGARA - ${nama}</b>\n━━━━━━━━━━━━━━━━━━\n` +
+        `Menampilkan ${daftar.length} negara termurah (angka dalam kurung = stok).</blockquote>`;
+    return bot.editMessageText(teks, { chat_id: chatId, message_id: messageId, parse_mode: "HTML", reply_markup: { inline_keyboard: baris } })
+        .catch(() => bot.sendMessage(chatId, teks, { parse_mode: "HTML", reply_markup: { inline_keyboard: baris } }));
+}
+
+async function otpKonfirmasi(chatId, messageId, userId, service, country) {
+    const [harga, negara, nama, saldo] = await Promise.all([
+        otpHargaPerNegara(service, country), otpNegaraMap(), otpNamaLayanan(service), getSaldoReal(userId)
+    ]);
+    const p = harga.find(h => String(h.country) === String(country));
+    if (!p) {
+        return bot.editMessageText("<blockquote>😔 Stok negara ini baru saja habis. Pilih negara lain.</blockquote>", {
+            chat_id: chatId, message_id: messageId, parse_mode: "HTML",
+            reply_markup: { inline_keyboard: [[{ text: "⬅️ Pilih Negara", callback_data: `otp_s_${service}` }]] }
+        });
+    }
+    const total = otpHarga(p.cost);
+    const cukup = saldo >= total;
+    const teks = `<blockquote>🧾 <b>KONFIRMASI ORDER OTP</b>\n━━━━━━━━━━━━━━━━━━\n` +
+        `🧩 Layanan: <b>${nama}</b>\n🌍 Negara: ${negara[country] || country}\n📦 Stok: ${p.count}\n` +
+        `💵 Harga: <b>${otpRp(total)}</b>\n💳 Saldo kamu: ${otpRp(saldo)}\n\n` +
+        (cukup ? `Nomor langsung dibuat setelah bayar.` : `⚠️ Saldo kurang ${otpRp(total - saldo)}. Silakan deposit dulu di menu Profil.`) +
+        `</blockquote>`;
+    const baris = [];
+    if (cukup) baris.push([{ text: `💳 Bayar ${otpRp(total)}`, callback_data: `otp_b_${service}_${country}`, style: "success" }]);
+    else baris.push([{ text: "💰 Deposit Saldo", callback_data: "menu_profil", style: "success" }]);
+    baris.push([{ text: "⬅️ Pilih Negara", callback_data: `otp_s_${service}` }]);
+    return bot.editMessageText(teks, { chat_id: chatId, message_id: messageId, parse_mode: "HTML", reply_markup: { inline_keyboard: baris } });
+}
+
+async function otpBeli(query, service, country) {
+    const userId = query.from.id;
+    const chatId = query.message.chat.id;
+    const messageId = query.message.message_id;
+    if (otpBeliLock.has(userId)) return bot.answerCallbackQuery(query.id, { text: "⏳ Pesanan sebelumnya masih diproses...", show_alert: true });
+    otpBeliLock.add(userId);
+    let dipotong = 0;
+    try {
+        await bot.answerCallbackQuery(query.id, { text: "Memproses..." }).catch(() => {});
+        const harga = await otpHargaPerNegara(service, country);
+        const p = harga.find(h => String(h.country) === String(country));
+        if (!p) return bot.sendMessage(chatId, "😔 Stok negara ini baru saja habis. Pilih negara lain.");
+        const total = otpHarga(p.cost);
+
+        const potong = await potongSaldoReal(userId, total, `Order OTP ${service}/${country}`);
+        if (!potong || !potong.status) {
+            return bot.sendMessage(chatId, `❌ Pembayaran gagal: ${(potong && (potong.msg || potong.message)) || "saldo tidak cukup"}`);
+        }
+        dipotong = total;
+
+        // maxPrice = harga modal yang tadi ditampilkan, supaya tidak ikut kenaikan harga diam-diam
+        const res = await heroApi("getNumberV2", { service, country, maxPrice: p.cost });
+        const err = heroErr(res);
+        if (err || !res || !res.activationId) {
+            const kode = err || "UNKNOWN";
+            if (["NO_BALANCE", "BAD_KEY", "NO_KEY", "CHANNELS_LIMIT"].includes(kode)) {
+                bot.sendMessage(settings.adminId, `<blockquote>⚠️ <b>HEROSMS ERROR</b>: <code>${kode}</code>\n${(res && res.details) || ""}</blockquote>`, { parse_mode: "HTML" }).catch(() => {});
+            }
+            const r = await refundSaldoReal(userId, total, `Refund OTP gagal beli - ${kode}`).catch(e => ({ status: false, msg: e.message }));
+            dipotong = 0;
+            if (!r || !r.status) {
+                bot.sendMessage(settings.adminId, `⚠️ REFUND OTP GAGAL user ${userId} ${otpRp(total)} (${kode})`).catch(() => {});
+            }
+            return bot.sendMessage(chatId, `❌ ${OTP_ERR_TEKS[kode] || "Gagal mengambil nomor (" + kode + ")."}\n${r && r.status ? "Saldo sudah dikembalikan." : "Admin akan mengembalikan saldo manual."}`);
+        }
+
+        const negara = await otpNegaraMap().catch(() => ({}));
+        const o = {
+            id: String(res.activationId),
+            userId, chatId,
+            phone: String(res.phoneNumber),
+            service, serviceName: await otpNamaLayanan(service),
+            country: String(country), countryName: negara[country] || String(country),
+            harga: total, cost: Number(res.activationCost) || p.cost,
+            endTime: Date.parse(res.activationEndTime) || Date.now() + 20 * 60 * 1000,
+            codes: [], status: "WAIT", refunded: false, messageId: null
+        };
+        dipotong = 0; // sudah jadi order; refund selanjutnya lewat otpRefund
+        await bot.deleteMessage(chatId, messageId).catch(() => {});
+        const sent = await bot.sendMessage(chatId, otpTeksOrder(o), { parse_mode: "HTML", reply_markup: otpKeyboard(o) });
+        o.messageId = sent.message_id;
+        otpOrders.set(o.id, o);
+        otpSimpan();
+        otpMulaiPantau(o);
+        bot.sendMessage(settings.adminId, `<blockquote>📱 <b>INCOME: NOMOR OTP</b>\n━━━━━━━━━━━━━━━━━━\n🆔 ID: <code>${userId}</code>\n🧩 ${o.serviceName} / ${o.countryName}\n💵 ${otpRp(total)} (modal $${o.cost})\n🧾 Aktivasi: <code>${o.id}</code></blockquote>`, { parse_mode: "HTML" }).catch(() => {});
+    } catch (e) {
+        console.log("[OTP] beli gagal:", e.message);
+        if (dipotong) {
+            const r = await refundSaldoReal(userId, dipotong, `Refund OTP error - ${e.message}`).catch(() => ({ status: false }));
+            bot.sendMessage(chatId, `⚠️ Terjadi kesalahan. ${r.status ? "Saldo sudah dikembalikan." : "Admin akan mengembalikan saldo manual."}`).catch(() => {});
+            if (!r.status) bot.sendMessage(settings.adminId, `⚠️ REFUND OTP GAGAL user ${userId} ${otpRp(dipotong)}: ${e.message}`).catch(() => {});
+        } else {
+            bot.sendMessage(chatId, "⚠️ Terjadi kesalahan, coba lagi nanti.").catch(() => {});
+        }
+    } finally {
+        otpBeliLock.delete(userId);
+    }
+}
+
+async function otpAksi(query, aksi, id) {
+    const o = otpOrders.get(id);
+    const jawab = (text, alert = true) => bot.answerCallbackQuery(query.id, { text, show_alert: alert }).catch(() => {});
+    if (!o) return jawab("Pesanan ini sudah selesai / tidak ditemukan.");
+    if (String(o.userId) !== String(query.from.id)) return jawab("Ini bukan pesanan kamu.");
+
+    if (aksi === "k") { // cek manual
+        await otpCekStatus(o);
+        return jawab(o.codes.length ? `🔑 Kode: ${o.codes[o.codes.length - 1]}` : "⏳ SMS belum masuk, tunggu sebentar ya.");
+    }
+    if (aksi === "x") { // batalkan
+        if (o.codes.length) return jawab("Kode sudah diterima, pesanan tidak bisa dibatalkan.");
+        const res = await heroApi("setStatus", { id, status: 8 }).catch(e => ({ title: e.message }));
+        if (res === "ACCESS_CANCEL") {
+            otpSelesai(o, "CANCEL");
+            await bot.editMessageText(otpTeksOrder(o) + "\n❌ <b>Dibatalkan.</b>", { chat_id: o.chatId, message_id: o.messageId, parse_mode: "HTML" }).catch(() => {});
+            await otpRefund(o, "dibatalkan");
+            return jawab("Pesanan dibatalkan, saldo dikembalikan.", false);
+        }
+        const err = heroErr(res);
+        if (err === "EARLY_CANCEL_DENIED") {
+            const tunggu = (res.info && res.info.minActivationTime) || 120;
+            return jawab(`Pembatalan baru bisa ${Math.ceil(tunggu / 60)} menit setelah nomor dibuat. Coba lagi sebentar.`);
+        }
+        if (err === "OTP_RECEIVED") { await otpCekStatus(o); return jawab("Kode sudah masuk, cek pesan di atas."); }
+        return jawab(`Gagal membatalkan (${err || res}).`);
+    }
+    if (aksi === "r") { // minta SMS lagi
+        const res = await heroApi("setStatus", { id, status: 3 }).catch(e => ({ title: e.message }));
+        if (res === "ACCESS_RETRY_GET") {
+            o.status = "WAIT";
+            otpSimpan();
+            otpMulaiPantau(o);
+            return jawab("Menunggu SMS baru...", false);
+        }
+        return jawab(`Tidak bisa minta SMS lagi (${heroErr(res) || res}).`);
+    }
+    if (aksi === "f") { // selesai
+        await heroApi("setStatus", { id, status: 6 }).catch(() => {});
+        otpSelesai(o, "DONE");
+        await bot.editMessageText(otpTeksOrder(o) + "\n✅ <b>Selesai. Terima kasih!</b>", { chat_id: o.chatId, message_id: o.messageId, parse_mode: "HTML" }).catch(() => {});
+        return jawab("Pesanan selesai.", false);
+    }
+}
+
+bot.on("callback_query", async (query) => {
+    const data = query.data || "";
+    if (data !== "menu_otp" && !data.startsWith("otp_")) return;
+    const chatId = query.message.chat.id;
+    const messageId = query.message.message_id;
+    const userId = query.from.id;
+    try {
+        if (data === "menu_otp") {
+            await bot.answerCallbackQuery(query.id).catch(() => {});
+            return otpTampilMenu(chatId, messageId);
+        }
+        if (!otpCfg().apiKey) return bot.answerCallbackQuery(query.id, { text: "Fitur OTP belum aktif.", show_alert: true });
+
+        if (data === "otp_cari") {
+            await bot.answerCallbackQuery(query.id).catch(() => {});
+            userSessions[chatId] = { type: "otp", step: "otp_search" };
+            return bot.sendMessage(chatId, "🔎 Ketik nama aplikasi yang dicari (contoh: <code>shopee</code>, <code>gojek</code>, <code>dana</code>):", { parse_mode: "HTML" });
+        }
+        if (data === "otp_aktif") {
+            const aktif = [...otpOrders.values()].filter(o => String(o.userId) === String(userId));
+            await bot.answerCallbackQuery(query.id).catch(() => {});
+            if (!aktif.length) return bot.sendMessage(chatId, "Tidak ada pesanan OTP yang aktif.");
+            for (const o of aktif) {
+                const sent = await bot.sendMessage(chatId, otpTeksOrder(o), { parse_mode: "HTML", reply_markup: otpKeyboard(o) });
+                o.messageId = sent.message_id; // tampilan terbaru yang di-update
+            }
+            return otpSimpan();
+        }
+        let m;
+        if ((m = data.match(/^otp_s_([a-z0-9]+)$/i))) {
+            await bot.answerCallbackQuery(query.id, { text: "Mengambil harga..." }).catch(() => {});
+            return otpPilihNegara(chatId, messageId, m[1]);
+        }
+        if ((m = data.match(/^otp_c_([a-z0-9]+)_(\d+)$/i))) {
+            await bot.answerCallbackQuery(query.id).catch(() => {});
+            return otpKonfirmasi(chatId, messageId, userId, m[1], m[2]);
+        }
+        if ((m = data.match(/^otp_b_([a-z0-9]+)_(\d+)$/i))) return otpBeli(query, m[1], m[2]);
+        if ((m = data.match(/^otp_([kxrf])_(\d+)$/))) return otpAksi(query, m[1], m[2]);
+    } catch (e) {
+        console.log("[OTP] callback error:", e.message);
+        bot.answerCallbackQuery(query.id, { text: "⚠️ Server OTP tidak merespons, coba lagi.", show_alert: true }).catch(() => {});
+    }
+});
+
+// Pencarian layanan OTP
+bot.on("message", async (msg) => {
+    const chatId = msg.chat.id;
+    const s = userSessions[chatId];
+    if (!s || s.step !== "otp_search" || !msg.text || msg.text.startsWith("/")) return;
+    delete userSessions[chatId];
+    try {
+        const kata = msg.text.trim().toLowerCase();
+        const hasil = (await otpDaftarLayanan())
+            .filter(x => x.code.toLowerCase() === kata || String(x.name).toLowerCase().includes(kata))
+            .slice(0, 10);
+        if (!hasil.length) {
+            return bot.sendMessage(chatId, `Layanan "<b>${msg.text.replace(/[<>&]/g, "")}</b>" tidak ditemukan.`, {
+                parse_mode: "HTML", reply_markup: { inline_keyboard: [[{ text: "🔎 Cari Lagi", callback_data: "otp_cari" }, { text: "⬅️ Menu OTP", callback_data: "menu_otp" }]] }
+            });
+        }
+        const baris = hasil.map(x => [{ text: x.name, callback_data: `otp_s_${x.code}` }]);
+        baris.push([{ text: "⬅️ Menu OTP", callback_data: "menu_otp" }]);
+        bot.sendMessage(chatId, `🔎 Hasil pencarian "${msg.text.replace(/[<>&]/g, "")}":`, { reply_markup: { inline_keyboard: baris } });
+    } catch (e) {
+        bot.sendMessage(chatId, "⚠️ Gagal mengambil daftar layanan, coba lagi nanti.");
+    }
+});
+
 //fitur broadcast
 // Fungsi Jeda Waktu (Taruh di paling atas file index.js mu jika belum ada, abaikan jika sudah ada)
 // ==========================================
 // COMMAND BROADCAST (SUPPORT MULTI-LINE / ENTER)
 // ==========================================
 // PERHATIKAN BARIS DI BAWAH INI, REGEX-NYA SUDAH KU UBAH:
-bot.onText(/^\/broadcast\s+([\s\S]+)/, async (msg, match) => {
-    const chatId = msg.chat.id;
-    const pesanBroadcast = match[1]; // Sekarang semua baris akan tertangkap!
+// ==========================================
+// BROADCAST RICH MESSAGE (/broadcast & /broadcastpin)
+// ==========================================
+// Isi pesan = Rich HTML Telegram (sendRichMessage). Ketik /broadcast atau /broadcastpin
+// tanpa teks untuk melihat panduan + contoh. Pratinjau dikirim ke admin dulu; kalau HTML
+// ditolak Telegram, broadcast dibatalkan sebelum sampai ke user.
+const BC_CONTOH = `<h3>🔥 Promo Akhir Pekan</h3>
+<p>Diskon <b>30%</b> untuk semua <u>VPS NAT</u> sampai <i>Minggu</i>!</p>
+<hr/>
+<table bordered striped>
+  <tr><th>Paket</th><th>Harga</th></tr>
+  <tr><td>NAT 1GB</td><td>Rp 15.000</td></tr>
+  <tr><td>NAT 2GB</td><td>Rp 25.000</td></tr>
+</table>
+<ul>
+  <li><input type="checkbox" checked>Aktif instan</li>
+  <li><input type="checkbox" checked>Garansi 30 hari</li>
+</ul>
+<details>
+  <summary>Syarat &amp; Ketentuan</summary>
+  <p>Berlaku untuk pembelian baru. Kode: <code>NAT30</code></p>
+</details>
+<blockquote>Info lengkap di <a href="https://boosteryuk.com">boosteryuk.com</a></blockquote>
+#tombol 🖥 Beli VPS | menu_vps
+#tombol 🌐 Website | https://boosteryuk.com`;
 
+const bcEscape = t => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+function bcPanduan(cmd) {
+    const pin = cmd === "/broadcastpin";
+    return `<b>📢 PANDUAN ${cmd.toUpperCase()}</b>\n` +
+        (pin ? `Pesan dikirim ke semua user <b>lalu di-pin</b> di chat mereka.\n\n` : `Pesan dikirim ke semua user.\n\n`) +
+        `<b>Cara pakai:</b>\n<code>${cmd} isi pesan</code>\n` +
+        `Isi pesan boleh teks biasa (enter tetap jadi baris baru) atau <b>Rich HTML</b>.\n\n` +
+        `<b>Tag yang bisa dipakai:</b>\n` +
+        `• Judul: <code>&lt;h1&gt;</code> s/d <code>&lt;h6&gt;</code>\n` +
+        `• Paragraf: <code>&lt;p&gt;</code>, baris baru <code>&lt;br&gt;</code>, garis <code>&lt;hr/&gt;</code>\n` +
+        `• Teks: <code>&lt;b&gt; &lt;i&gt; &lt;u&gt; &lt;s&gt; &lt;code&gt; &lt;mark&gt; &lt;tg-spoiler&gt;</code>\n` +
+        `• Link: <code>&lt;a href="https://..."&gt;teks&lt;/a&gt;</code>\n` +
+        `• Kutipan: <code>&lt;blockquote&gt;</code>\n` +
+        `• Daftar: <code>&lt;ul&gt;/&lt;ol&gt;</code> + <code>&lt;li&gt;</code>, ceklis <code>&lt;li&gt;&lt;input type="checkbox" checked&gt;</code>\n` +
+        `• Tabel: <code>&lt;table bordered striped&gt;</code> + <code>&lt;tr&gt; &lt;th&gt; &lt;td&gt;</code>\n` +
+        `• Buka-tutup: <code>&lt;details&gt;&lt;summary&gt;Judul&lt;/summary&gt;...&lt;/details&gt;</code>\n` +
+        `• Gambar: <code>&lt;img src="https://link-gambar.jpg"/&gt;</code>\n\n` +
+        `<b>Tombol</b> (opsional, satu baris satu tombol, ditaruh di akhir):\n` +
+        `<code>#tombol Teks | menu_vps</code>  → buka menu bot\n` +
+        `<code>#tombol Teks | https://link</code>  → buka link\n` +
+        `Tanpa #tombol, otomatis pakai tombol Beli VPS & Beli Panel.\n\n` +
+        `<b>Penting:</b> tulis <code>&amp;amp;</code> untuk simbol &amp;, <code>&amp;lt;</code> untuk &lt;. ` +
+        `Pratinjau dikirim ke kamu dulu; kalau formatnya salah, broadcast dibatalkan.\n\n` +
+        `<b>Contoh lengkap</b> (salin semua lalu kirim):\n<pre>${bcEscape(`${cmd} ${BC_CONTOH}`)}</pre>`;
+}
+
+// Pisahkan baris "#tombol Teks | target" dari isi pesan
+function bcParse(raw) {
+    const tombol = [];
+    const isi = [];
+    for (const line of String(raw).split("\n")) {
+        const m = line.match(/^\s*#tombol\s+(.+?)\s*\|\s*(\S+)\s*$/i);
+        if (m) tombol.push(/^https?:\/\//i.test(m[2]) ? { text: m[1], url: m[2] } : { text: m[1], callback_data: m[2].slice(0, 64) });
+        else isi.push(line);
+    }
+    let body = isi.join("\n").trim();
+    // Teks biasa tanpa tag: amankan simbol & ubah enter jadi baris baru
+    if (!/<[a-z][\s\S]*>/i.test(body)) {
+        body = body.split(/\n{2,}/).map(par => `<p>${bcEscape(par).replace(/\n/g, "<br>")}</p>`).join("\n");
+    }
+    const rows = [];
+    for (let i = 0; i < tombol.length; i += 2) rows.push(tombol.slice(i, i + 2));
+    return { body, rows };
+}
+
+async function bcKirimRich(chatId, html, rows) {
+    try {
+        return await sendRichMessage(chatId, html, { reply_markup: { inline_keyboard: rows } });
+    } catch (e) {
+        const tunggu = Number((e.message.match(/retry after (\d+)/i) || [])[1]);
+        if (!tunggu) throw e;
+        await delay((tunggu + 1) * 1000); // kena limit Telegram: tunggu lalu coba sekali lagi
+        return sendRichMessage(chatId, html, { reply_markup: { inline_keyboard: rows } });
+    }
+}
+
+async function jalankanBroadcast(msg, raw, pin) {
+    const chatId = msg.chat.id;
+    const cmd = pin ? "/broadcastpin" : "/broadcast";
     if (String(chatId) !== String(settings.adminId)) {
         return bot.sendMessage(chatId, "⚠️ Akses Ditolak. Command ini khusus Admin.");
     }
-
-    const users = getUsers();
-    const userIds = Array.isArray(users) ? users : Object.keys(users);
-
-    if (userIds.length === 0) {
-        return bot.sendMessage(chatId, "⚠️ Belum ada user di database.");
-    }
-
-    await bot.sendMessage(chatId, `⏳ Mengirim Broadcast ke *${userIds.length}* user...`, { parse_mode: "Markdown" });
-    
-    // ==========================================
-    // RUMUS WAKTU WIB
-    // ==========================================
-    const now = new Date();
-    const tglOptions = { timeZone: 'Asia/Jakarta', day: '2-digit', month: 'long', year: 'numeric' };
-    const jamOptions = { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', hour12: false };
-    
-    const tanggalStr = now.toLocaleDateString('id-ID', tglOptions); 
-    const jamStr = now.toLocaleTimeString('id-ID', jamOptions).replace(/\./g, ':'); 
-    
-    const waktuBroadcast = `${tanggalStr} | ${jamStr} WIB`;
-
-    // ==========================================
-    // 1. BUAT FORMAT PESAN QUOTE (HTML)
-    // ==========================================
-    const broadcastMsg = `<blockquote>📢 <b>INFORMASI TERBARU</b>\n━━━━━━━━━━━━━━━━━━\n\n${pesanBroadcast}\n\n📅 <i>Diterbitkan: ${waktuBroadcast}</i></blockquote>`;
-
-    // ==========================================
-    // 2. BUAT TOMBOL PILIHAN (MENU VPS & PANEL)
-    // ==========================================
-    const broadcastOptions = {
-        parse_mode: "HTML",
-        reply_markup: {
-            inline_keyboard: [
-                [
-                    { text: "𝘉𝘦𝘭𝘪 𝘝𝘗𝘚 🖥", callback_data: "menu_vps", style: "success" },
-                    { text: "𝘉𝘦𝘭𝘪 𝘗𝘢𝘯𝘦𝘭 📡", callback_data: "menu_panel", style: "success" }
-                ]
-            ]
-        }
-    };
-
-    let sukses = 0;
-    let gagal = 0;
-
-    // Kirim pesan satu per satu ke semua user di database
-    for (const userId of userIds) {
-        try {
-            await bot.sendMessage(userId, broadcastMsg, broadcastOptions);
-            sukses++;
-        } catch (error) {
-            gagal++; // Jika gagal (misal user memblokir bot)
-        }
-        
-        // JEDA 50ms SANGAT PENTING AGAR BOT TIDAK DIBLOKIR TELEGRAM (RATE LIMIT)
-        await delay(50);
-    }
-
-    bot.sendMessage(chatId, `<blockquote>✅ <b>Broadcast Selesai!</b>\n━━━━━━━━━━━━━━━━━━\n\n🟢 Berhasil terkirim: ${sukses} user\n🔴 Gagal (Bot diblokir): ${gagal} user</blockquote>`, { parse_mode: "HTML" });
-});
-
-// ==========================================
-// COMMAND BROADCAST + OTOMATIS PIN (PINNED MESSAGE)
-// ==========================================
-bot.onText(/^\/broadcastpin\s+([\s\S]+)/, async (msg, match) => {
-    const chatId = msg.chat.id;
-    const pesanBroadcast = match[1]; 
-
-    if (String(chatId) !== String(settings.adminId)) {
-        return bot.sendMessage(chatId, "⚠️ Akses Ditolak. Command ini khusus Admin.");
+    if (!raw || !raw.trim()) {
+        await bot.sendMessage(chatId, bcPanduan(cmd), { parse_mode: "HTML" });
+        const contoh = bcParse(BC_CONTOH);
+        return bcKirimRich(chatId, `<p><i>⬇️ Hasil contoh di atas:</i></p>\n${contoh.body}`, contoh.rows)
+            .catch(e => bot.sendMessage(chatId, `⚠️ Pratinjau contoh gagal: ${e.message}`));
     }
 
     const users = getUsers();
-    const userIds = Array.isArray(users) ? users : Object.keys(users);
+    const userIds = (Array.isArray(users) ? users : Object.keys(users)).filter(id => String(id) !== String(chatId));
+    if (userIds.length === 0) return bot.sendMessage(chatId, "⚠️ Belum ada user di database.");
 
-    if (userIds.length === 0) {
-        return bot.sendMessage(chatId, "⚠️ Belum ada user di database.");
+    const now = new Date();
+    const tanggalStr = now.toLocaleDateString("id-ID", { timeZone: "Asia/Jakarta", day: "2-digit", month: "long", year: "numeric" });
+    const jamStr = now.toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", hour12: false }).replace(/\./g, ":");
+
+    const { body, rows } = bcParse(raw);
+    const judul = pin ? "📌 PENGUMUMAN PENTING" : "📢 INFORMASI TERBARU";
+    const html = `<h3>${judul}</h3>\n<hr/>\n${body}\n<hr/>\n<footer>📅 Diterbitkan: ${tanggalStr} | ${jamStr} WIB</footer>`;
+    const tombol = rows.length ? rows : [[
+        { text: "🖥 𝘉𝘦𝘭𝘪 𝘝𝘗𝘚", callback_data: "menu_vps", style: "success" },
+        { text: "📡 𝘉𝘦𝘭𝘪 𝘗𝘢𝘯𝘦𝘭", callback_data: "menu_panel", style: "success" }
+    ]];
+
+    // 1. Pratinjau ke admin = validasi format
+    try {
+        await bcKirimRich(chatId, html, tombol);
+    } catch (e) {
+        return bot.sendMessage(chatId, `❌ <b>Broadcast dibatalkan</b>, format ditolak Telegram:\n<code>${bcEscape(e.message)}</code>\n\nKetik <code>${cmd}</code> tanpa teks untuk melihat panduan.`, { parse_mode: "HTML" });
     }
 
-    await bot.sendMessage(chatId, `⏳ Mengirim & Menge-PIN Broadcast ke *${userIds.length}* user...`, { parse_mode: "Markdown" });
-    
-    // ==========================================
-    // RUMUS WAKTU WIB
-    // ==========================================
-    const now = new Date();
-    const tglOptions = { timeZone: 'Asia/Jakarta', day: '2-digit', month: 'long', year: 'numeric' };
-    const jamOptions = { timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit', hour12: false };
-    
-    const tanggalStr = now.toLocaleDateString('id-ID', tglOptions); 
-    const jamStr = now.toLocaleTimeString('id-ID', jamOptions).replace(/\./g, ':'); 
-    
-    const waktuBroadcast = `${tanggalStr} | ${jamStr} WIB`;
+    await bot.sendMessage(chatId, `⏳ Pratinjau di atas sedang dikirim${pin ? " & di-pin" : ""} ke <b>${userIds.length}</b> user...`, { parse_mode: "HTML" });
 
-    // ==========================================
-    // 1. BUAT FORMAT PESAN QUOTE (HTML)
-    // ==========================================
-    const broadcastMsg = `<blockquote>📌 <b>PENGUMUMAN PENTING</b>\n━━━━━━━━━━━━━━━━━━\n\n${pesanBroadcast}\n\n📅 <i>Diterbitkan: ${waktuBroadcast}</i></blockquote>`;
-
-    // ==========================================
-    // 2. BUAT TOMBOL PILIHAN
-    // ==========================================
-    const broadcastOptions = {
-        parse_mode: "HTML",
-        reply_markup: {
-            inline_keyboard: [
-                [
-                    { text: "🖥 𝘉𝘦𝘭𝘪 𝘝𝘗𝘚", callback_data: "menu_vps", style: "success" },
-                    { text: "📡 𝘉𝘦𝘭𝘪 𝘗𝘢𝘯𝘦𝘭", callback_data: "menu_panel", style: "success" }
-                ]
-            ]
-        }
-    };
-
-    let sukses = 0;
-    let gagal = 0;
-
-    // Kirim pesan satu per satu ke semua user
+    let sukses = 0, gagal = 0, blokir = 0;
     for (const userId of userIds) {
         try {
-            // TAHAP 1: Kirim Pesan seperti biasa
-            const sentMsg = await bot.sendMessage(userId, broadcastMsg, broadcastOptions);
-            
-            // TAHAP 2: Otomatis Pin pesan yang baru saja dikirim!
-            // Menggunakan message_id dari pesan yang barusan sukses terkirim
-            await bot.pinChatMessage(userId, sentMsg.message_id).catch(() => {});
-            
+            const sent = await bcKirimRich(userId, html, tombol);
+            if (pin && sent && sent.message_id) await bot.pinChatMessage(userId, sent.message_id).catch(() => {});
             sukses++;
-        } catch (error) {
-            gagal++; // Gagal jika diblokir
+        } catch (e) {
+            if (/blocked|deactivated|chat not found/i.test(e.message)) blokir++; else gagal++;
         }
-        
-        // Jeda agak dinaikkan jadi 100ms karena bot melakukan 2 tindakan sekaligus (Send & Pin)
-        // Ini SANGAT PENTING agar bot kamu tidak dibanned oleh Telegram.
-        await delay(100);
+        // ±20 pesan/detik, di bawah batas Telegram 30/detik (pin = 2 aksi, jadi lebih lambat)
+        await delay(pin ? 100 : 50);
     }
 
-    bot.sendMessage(chatId, `<blockquote>✅ <b>Broadcast & Pin Selesai!</b>\n━━━━━━━━━━━━━━━━━━\n\n📌 Pesan telah di-Pin ke semua user!\n\n🟢 Berhasil terkirim: ${sukses} user\n🔴 Gagal (Bot diblokir): ${gagal} user</blockquote>`, { parse_mode: "HTML" });
-});
+    bot.sendMessage(chatId, `<blockquote>✅ <b>Broadcast${pin ? " & Pin" : ""} Selesai!</b>\n━━━━━━━━━━━━━━━━━━\n\n` +
+        `🟢 Terkirim: ${sukses} user\n🚫 Blokir/akun hapus: ${blokir} user\n🔴 Gagal lain: ${gagal} user</blockquote>`, { parse_mode: "HTML" });
+}
+
+bot.onText(/^\/broadcast(?:@\w+)?(?:\s+([\s\S]+))?$/, (msg, match) => jalankanBroadcast(msg, match[1], false));
+bot.onText(/^\/broadcastpin(?:@\w+)?(?:\s+([\s\S]+))?$/, (msg, match) => jalankanBroadcast(msg, match[1], true));
 
 // cekid
 bot.onText(/\/cekid/, async (msg) => {

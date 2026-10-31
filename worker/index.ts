@@ -265,7 +265,10 @@ export default {
           order_items: [{ sku: "DEP", name: "Deposit", price: amount, quantity: 1 }],
           callback_url: "https://boosteryuk.boosteryukid.workers.dev/api/tripay/callback",
           return_url: "https://boosteryuk.com",
-          expired_time: Math.floor(Date.now() / 1000) + 86400,
+          // Bot mengirim expired_seconds (1800) dan berhenti memantau setelahnya; QR harus ikut mati.
+          // Tanpa field ini (website) tetap 24 jam.
+          expired_time: Math.floor(Date.now() / 1000) +
+            Math.min(Math.max(parseInt(b.expired_seconds) || 86400, 300), 86400),
           signature
         };
 
