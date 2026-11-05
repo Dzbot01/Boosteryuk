@@ -5,6 +5,12 @@ const settings = {
 urladmin: 'https://t.me/helpboosteryuk',
 assemblyApiKey: "30cc65c70f5347baba64b0bfd769fa4d",
 
+
+smsbower: {
+  apiKey: 'ZemU1tMZNs8qNFJxEaMDRGB962T4ALrtoosteryuk',
+  baseUrl: 'https://smsbower.page/stubs/handler_api.php',
+  kurs: 17000, markupPersen: 20, markupMin: 1000,
+},
  // === SMM PANEL FAYUPEDIA ===
   smm: {
     baseUrl: 'https://fayupedia.id/api', // Base URL doang
@@ -12,6 +18,14 @@ assemblyApiKey: "30cc65c70f5347baba64b0bfd769fa4d",
     apiId: '147506'
   },
   
+  herosms: {
+    apiKey: '6A2cbce81476b89041896c5A1Ad148b7',
+    kurs: 17000,
+    markupPersen: 20,
+    markupMin: 1000,
+    maxNegara: 10,
+    negaraUtama: 6,
+  },
 
 vnPromo: {
         active: true,      // true = aktif, false = mati

@@ -41,6 +41,7 @@
     "tls": "latest",
     "url": "latest",
     "user-agents": "latest",
-    "util": "latest"
+    "util": "latest",
+    "@napi-rs/canvas": "^1.1.0"
   }
 }

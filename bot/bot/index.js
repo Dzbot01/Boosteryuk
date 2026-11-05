@@ -248,13 +248,37 @@ function cleanDesc(desc) {
 //POTONG DAN REFUND SALDO DI WEBSITE
 const WORKER = "https://boosteryuk.boosteryukid.workers.dev";
 
+// Balasan Worker/website kadang bukan JSON (mis. halaman Cloudflare "error code: 502").
+// Jangan lempar error "Unexpected token": kembalikan objek gagal yang jelas.
+async function bacaJsonAman(r, label) {
+  const txt = await r.text();
+  try { return JSON.parse(txt); } catch {
+    const ringkas = String(txt).replace(/\s+/g, " ").trim().slice(0, 80);
+    console.log(`[${label}] balasan bukan JSON (HTTP ${r.status}): ${ringkas}`);
+    return { status: false, success: false, gangguan: true, http: r.status, msg: `Server saldo/pembayaran sedang gangguan (HTTP ${r.status}). Coba lagi beberapa menit lagi.`, message: `gangguan HTTP ${r.status}`, raw: ringkas };
+  }
+}
+const lastGangguanSaldo = {};
+function laporGangguanSaldo(jenis, telegram_id, amount, res) {
+  if (Date.now() - (lastGangguanSaldo[jenis] || 0) < 5 * 60 * 1000) return; // maks 1 notif / 5 menit per jenis
+  lastGangguanSaldo[jenis] = Date.now();
+  bot.sendMessage(settings.adminId, `<blockquote>⚠️ <b>WORKER SALDO GANGGUAN (${jenis})</b>\n🆔 User: <code>${telegram_id}</code>\n💵 Rp ${Number(amount).toLocaleString("id-ID")}\n❗ HTTP ${res.http}: ${String(res.raw || "").replace(/[<>&]/g, "")}\n\nCek boosteryuk.com/api & Worker. Kalau saldo user ternyata terpotong, kembalikan manual.</blockquote>`, { parse_mode: "HTML" }).catch(() => {});
+}
+
 async function potongSaldoReal(telegram_id, amount, note = "order bot") {
-  const r = await fetch(`${WORKER}/api/telegram/deduct`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ telegram_id, amount, note })
-  });
-  return await r.json(); // { status:true, new_balance:28000, deducted:5000 } atau { status:false, msg:"Saldo tidak cukup" }
+  try {
+    const r = await fetch(`${WORKER}/api/telegram/deduct`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ telegram_id, amount, note }),
+      signal: AbortSignal.timeout(20000)
+    });
+    const res = await bacaJsonAman(r, "DEDUCT"); // { status:true, new_balance, deducted } atau { status:false, msg }
+    if (res.gangguan) laporGangguanSaldo("potong", telegram_id, amount, res);
+    return res;
+  } catch (e) {
+    return { status: false, gangguan: true, msg: `Server saldo tidak bisa dihubungi (${e.message}). Coba lagi beberapa menit lagi.` };
+  }
 }
 //TRIPAY API WORKER
 const WORKER_TRIPAY = "https://boosteryuk.boosteryukid.workers.dev/api/tripay";
@@ -267,12 +291,12 @@ async function buatQrisTripay({ amount, merchant_ref, customer_name }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ amount, method: "QRIS", merchant_ref, customer_name, expired_seconds: 1800 })
     });
-    return await r.json();
+    return await bacaJsonAman(r, "TRIPAY CREATE");
 }
 
 async function statusTripay(reference) {
     const r = await fetch(`${WORKER_TRIPAY}/status?reference=${encodeURIComponent(reference)}`);
-    return await r.json();
+    return await bacaJsonAman(r, "TRIPAY STATUS");
 }
 async function refundSaldoReal(telegram_id, amount, note = "refund bot") {
   const r = await fetch(`${WORKER}/api/telegram/refund`, {
@@ -280,7 +304,49 @@ async function refundSaldoReal(telegram_id, amount, note = "refund bot") {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ telegram_id, amount, note })
   });
-  return await r.json(); // { status:true, new_balance:33000, refunded:5000 }
+  const res = await bacaJsonAman(r, "REFUND"); // { status:true, new_balance:33000, refunded:5000 }
+  if (res.gangguan) laporGangguanSaldo("refund", telegram_id, amount, res);
+  return res;
+}
+// ====================================================
+// KREDIT SALDO WEBSITE (deposit, hadiah gacha)
+// ====================================================
+// Endpoint penambah saldo di Worker = /api/telegram/refund (sama dengan refundSaldoReal).
+// Retry hanya kalau request tidak sampai (error jaringan). Kalau server sudah menjawab tapi
+// jawabannya tidak jelas, JANGAN retry (bisa kredit ganda) -> catat pending & lapor admin.
+const KREDIT_PENDING_FILE = "./database/kredit_pending.json";
+function saldoSukses(r) {
+    return !!r && (r.status === true || r.status === "true" || r.status === "success" || r.success === true || r.ok === true);
+}
+async function kreditSaldoWebsite(telegram_id, amount, note) {
+    let alasan = "";
+    for (let coba = 1; coba <= 2; coba++) {
+        let resp;
+        try {
+            resp = await fetch(`${WORKER}/api/telegram/refund`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ telegram_id, amount, note }),
+                signal: AbortSignal.timeout(20000)
+            });
+        } catch (e) {
+            alasan = `jaringan: ${e.message}`;
+            if (coba === 1) { await new Promise(r => setTimeout(r, 1500)); continue; }
+            break;
+        }
+        const txt = await resp.text();
+        let r; try { r = JSON.parse(txt); } catch { r = null; }
+        if (saldoSukses(r)) return { ...r, status: true, new_balance: Number(r.new_balance ?? r.balance ?? r.saldo ?? 0) };
+        alasan = (r && (r.msg || r.message)) || `respon tidak dikenal: ${String(txt).slice(0, 120)}`;
+        break;
+    }
+    try {
+        const list = fs.existsSync(KREDIT_PENDING_FILE) ? JSON.parse(fs.readFileSync(KREDIT_PENDING_FILE, "utf8")) : [];
+        list.push({ telegram_id, amount, note, alasan, at: new Date().toISOString() });
+        fs.writeFileSync(KREDIT_PENDING_FILE, JSON.stringify(list, null, 2));
+    } catch (e) { console.log("Gagal catat kredit pending:", e.message); }
+    bot.sendMessage(settings.adminId, `<blockquote>⚠️ <b>KREDIT SALDO WEBSITE GAGAL</b>\n🆔 User: <code>${telegram_id}</code>\n💵 Rp ${Number(amount).toLocaleString("id-ID")}\n📝 ${String(note).replace(/[<>&]/g, "")}\n❗ ${String(alasan).replace(/[<>&]/g, "")}\n\nTercatat di database/kredit_pending.json, kreditkan manual.</blockquote>`, { parse_mode: "HTML" }).catch(() => {});
+    return { status: false, msg: alasan };
 }
 //Ambil saldo dari website boosteryuk
 // TARUH DI ATAS SEKALI, DEKAT getStore()
@@ -363,6 +429,386 @@ async function refreshServices() {
     console.error('Gagal refresh services:', e.message);
   }
 }
+
+// ====================================================
+// SMM: KATEGORI -> LAYANAN (berdasarkan field category, contoh "Tiktok Likes", "Tiktok View")
+// ====================================================
+const smmCariTerakhir = {}; // chatId -> kata kunci terakhir (untuk tombol kembali)
+const smmEsc = t => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+function smmHash(str) {
+    let h = 0;
+    for (const ch of String(str)) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+    return h.toString(36);
+}
+function smmKategoriDari(hash) {
+    for (const s of globalServices) {
+        const c = String(s.category || "").trim();
+        if (c && smmHash(c) === hash) return c;
+    }
+    return null;
+}
+// -> [[kategori, jumlahLayanan, hargaTermurah]] yang cocok dengan kata kunci (nama kategori, lalu nama layanan)
+function smmKategoriCocok(keyword) {
+    const k = String(keyword || "").toLowerCase().trim();
+    const map = new Map();
+    const catat = s => {
+        const c = String(s.category || "").trim();
+        const ada = map.get(c) || [c, 0, Infinity];
+        ada[1]++; ada[2] = Math.min(ada[2], Number(s.price) || Infinity);
+        map.set(c, ada);
+    };
+    for (const s of globalServices) if (String(s.category || "").toLowerCase().includes(k)) catat(s);
+    if (!map.size) for (const s of globalServices) if (String(s.name || "").toLowerCase().includes(k)) catat(s);
+    return [...map.values()].sort((a, b) => a[0].localeCompare(b[0]));
+}
+
+async function smmKirimKategori(chatId, keyword) {
+    const list = smmKategoriCocok(keyword);
+    if (!list.length) {
+        const kata3 = String(keyword).toLowerCase().slice(0, 3);
+        const saran = [...new Set(globalServices.map(s => String(s.category || "").split(" ")[0]))]
+            .filter(k => k && k.toLowerCase().includes(kata3)).slice(0, 6);
+        await bot.sendMessage(chatId, `❌ Kategori "<b>${smmEsc(keyword)}</b>" tidak tersedia.` +
+            (saran.length ? `\n\nMungkin maksud kamu: ${saran.map(x => `<code>${smmEsc(x)}</code>`).join(", ")}` : "") +
+            `\n\nKetik ulang atau /cancel`, { parse_mode: "HTML" });
+        return false;
+    }
+    smmCariTerakhir[chatId] = keyword;
+    const total = list.reduce((n, x) => n + x[1], 0);
+    const tampil = list.slice(0, 40);
+    const btn = tampil.map(([cat, n], i) => [{ text: `📂 ${i + 1}. ${cat} (${n})`, callback_data: `sk|${smmHash(cat)}|1` }]);
+    btn.push([{ text: "🔎 Cari Kategori Lain", callback_data: "kat" }]);
+    const rp = n => Number.isFinite(n) ? `Rp${Number(n).toLocaleString("id-ID")}` : "-";
+    // Rich message: deskripsi, garis pembatas, tabel; tombol menempel di pesan yang sama
+    const gambar = /^https?:\/\//i.test(settings.pp || "") ? `<img src="${smmEsc(settings.pp)}"/>\n` : "";
+    const html = `${gambar}<h3>💎 SMM PANEL</h3>\n` +
+        `<p>Hasil "<b>${smmEsc(keyword)}</b>": ${list.length} kategori, ${total} layanan. Pilih jenis layanan (Follower, Like, View, dll) lewat tombol bernomor di bawah tabel.</p>\n<hr/>\n` +
+        `<table bordered striped compact>\n  <tr><th>No</th><th>Kategori</th><th>Layanan</th><th>Mulai dari /1k</th></tr>\n` +
+        tampil.map(([cat, n, min], i) => `  <tr><td>${i + 1}</td><td>${smmEsc(cat)}</td><td>${n}</td><td>${rp(min)}</td></tr>`).join("\n") +
+        `\n</table>`;
+    const caption = `<b>💎 SMM PANEL</b>\nHasil "<b>${smmEsc(keyword)}</b>": ${list.length} kategori, ${total} layanan\n━━━━━━━━━━━━━━━━━━\n` +
+        `<blockquote>Pilih jenis layanan (Follower, Like, View, dll):</blockquote>`;
+    await sendRichMessage(chatId, html, { reply_markup: { inline_keyboard: btn } })
+        .catch(() => bot.sendPhoto(chatId, settings.pp, { caption, parse_mode: "HTML", reply_markup: { inline_keyboard: btn } }))
+        .catch(() => bot.sendMessage(chatId, caption, { parse_mode: "HTML", reply_markup: { inline_keyboard: btn } }));
+    return true;
+}
+
+async function smmKirimLayanan(chatId, messageId, kategori, page) {
+    const semua = globalServices
+        .filter(s => String(s.category || "").trim() === kategori)
+        .sort((a, b) => (Number(a.price) || 0) - (Number(b.price) || 0));
+    const perPage = 10;
+    const totalPage = Math.max(1, Math.ceil(semua.length / perPage));
+    page = Math.min(Math.max(1, page), totalPage);
+    const list = semua.slice((page - 1) * perPage, page * perPage);
+
+    const rp = n => `Rp${Number(n || 0).toLocaleString("id-ID")}`;
+    const ang = n => Number(n || 0).toLocaleString("id-ID");
+    // Rich message: deskripsi, garis pembatas, tabel; tombol menempel di pesan yang sama
+    const html = `<h3>📑 ${smmEsc(kategori)}</h3>\n` +
+        `<p>Halaman ${page}/${totalPage} • ${semua.length} layanan. Klik tombol bernomor di bawah tabel untuk order.</p>\n<hr/>\n` +
+        `<table bordered striped compact>\n  <tr><th>No</th><th>Layanan</th><th>Harga /1k</th><th>Min</th><th>Max</th></tr>\n` +
+        list.map((s, i) => `  <tr><td>${(page - 1) * perPage + i + 1}</td><td>${smmEsc(s.name)}</td><td>${rp(smmHargaPer1k(s))}</td><td>${ang(s.min)}</td><td>${ang(s.max)}</td></tr>`).join("\n") +
+        `\n</table>`;
+    let text = `<b>📑 ${smmEsc(kategori)}</b>\nHalaman ${page}/${totalPage} • ${semua.length} layanan\n━━━━━━━━━━━━━━━━━━\n\n`;
+    list.forEach((s, i) => {
+        text += `<b>${(page - 1) * perPage + i + 1}.</b> ${smmEsc(s.name)}\n   💰 ${rp(smmHargaPer1k(s))}/1k • Min ${Number(s.min).toLocaleString("id-ID")} • Max ${Number(s.max).toLocaleString("id-ID")}\n`;
+    });
+    text += `\n<i>Klik layanan untuk order.</i>`;
+
+    const btn = list.map((s, i) => [{ text: `${(page - 1) * perPage + i + 1}. ${String(s.name).slice(0, 45)} • ${rp(smmHargaPer1k(s))}/1k`, callback_data: `o|${s.id}` }]);
+    const h = smmHash(kategori);
+    const nav = [];
+    if (page > 1) nav.push({ text: "⬅️ Sebelumnya", callback_data: `sk|${h}|${page - 1}` });
+    if (page < totalPage) nav.push({ text: "Selanjutnya ➡️", callback_data: `sk|${h}|${page + 1}` });
+    if (nav.length) btn.push(nav);
+    btn.push([{ text: "⬅️ Ganti Jenis Layanan", callback_data: "sks|" }, { text: "🔎 Cari Lain", callback_data: "kat" }]);
+
+    if (messageId) await bot.deleteMessage(chatId, messageId).catch(() => {});
+    return sendRichMessage(chatId, html, { reply_markup: { inline_keyboard: btn } })
+        .catch(() => bot.sendMessage(chatId, text, { parse_mode: "HTML", reply_markup: { inline_keyboard: btn } }));
+}
+
+// ====================================================
+// SMM: ORDER LAYANAN (link -> komentar/jumlah -> ringkasan -> Pesan)
+// ====================================================
+// Order dikirim langsung ke API panel SMM (settings.smm). Default endpoint `${baseUrl}/order`
+// dengan api_id/api_key (pola yang sama dengan /services). Bisa diubah lewat settings.smm.orderPath.
+const SMM_ORDER_FILE = path.join(__dirname, "database", "smm_orders.json");
+const smmOrderLock = new Set();
+
+// Harga jual per 1000 (harga panel + markup opsional settings.smm.markupPersen)
+function smmHargaPer1k(s) {
+    const m = Number((settings.smm || {}).markupPersen) || 0;
+    return Math.ceil((Number(s.price) || 0) * (1 + m / 100));
+}
+function smmTotal(s, qty) {
+    return Math.max(1, Math.ceil(smmHargaPer1k(s) * Number(qty) / 1000));
+}
+// Layanan komentar custom: user mengetik komentar sendiri, 1 baris = 1 komentar
+function smmButuhKomentar(s) {
+    const tipe = String(s.type || "").toLowerCase();
+    if (tipe.includes("custom_comment") || tipe.includes("comments")) return true;
+    const teks = `${s.name || ""} ${s.category || ""}`.toLowerCase();
+    return /(komentar|comment)/.test(teks) && /(custom|kustom)/.test(teks);
+}
+function smmRp(n) { return `Rp${Number(n || 0).toLocaleString("id-ID")}`; }
+function smmCatatOrder(rec) {
+    try {
+        const list = fs.existsSync(SMM_ORDER_FILE) ? JSON.parse(fs.readFileSync(SMM_ORDER_FILE, "utf8")) : [];
+        list.push(rec);
+        fs.writeFileSync(SMM_ORDER_FILE, JSON.stringify(list.slice(-2000), null, 2));
+    } catch (e) { console.log("[SMM] gagal catat order:", e.message); }
+}
+
+// Pesan error panel -> bahasa user
+function smmTerjemahError(msg) {
+    const m = String(msg || "").toLowerCase();
+    if (/saldo|balance|insufficient|not enough/.test(m)) return "Stok layanan di server sedang kosong. Admin sudah diberi tahu.";
+    if (/link|target|url|username/.test(m)) return "Link/target tidak valid atau tidak bisa diproses. Periksa lagi link-nya (akun harus publik).";
+    if (/min|max|quantity|jumlah/.test(m)) return "Jumlah pesanan di luar batas minimal/maksimal layanan.";
+    if (/service|layanan|disabled|nonaktif|not found/.test(m)) return "Layanan ini sedang tidak tersedia. Pilih layanan lain.";
+    if (/comment|komentar/.test(m)) return "Format komentar ditolak. Pastikan 1 baris = 1 komentar.";
+    if (/active order|pending|sudah ada pesanan|duplicate/.test(m)) return "Masih ada pesanan aktif untuk link yang sama. Tunggu selesai dulu.";
+    return "Pesanan ditolak server. Coba lagi beberapa saat atau pilih layanan lain.";
+}
+
+// Kirim order ke panel. Hasil: { ok, orderId, pesan, pasti } ; pasti=false = tidak jelas apakah order terbuat (timeout / bukan JSON)
+async function smmBuatOrder({ serviceId, target, quantity, komentar }) {
+    const c = settings.smm || {};
+    const url = `${String(c.baseUrl || SMM_BASE).replace(/\/$/, "")}${c.orderPath || "/order"}`;
+    const body = {
+        api_id: c.apiId, api_key: c.apiKey, action: "order",
+        service: serviceId, target, link: target, quantity
+    };
+    if (komentar) { body.custom_comments = komentar; body.comments = komentar; }
+    let r;
+    try {
+        r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(30000) });
+    } catch (e) {
+        // Request mungkin sudah sampai; jangan refund otomatis
+        return { ok: false, pasti: false, pesan: `koneksi ke panel terputus (${e.message})` };
+    }
+    const txt = await r.text();
+    let d; try { d = JSON.parse(txt); } catch { d = null; }
+    if (!d) return { ok: false, pasti: r.status >= 400 && r.status < 500, pesan: `balasan panel bukan JSON (HTTP ${r.status}): ${txt.replace(/\s+/g, " ").slice(0, 80)}` };
+    const ok = d.status === true || d.status === "true" || d.status === "success" || d.success === true;
+    const data = d.data && typeof d.data === "object" ? d.data : {};
+    const orderId = data.id ?? data.order ?? data.order_id ?? d.order ?? d.order_id ?? d.id ?? null;
+    const pesan = data.msg ?? d.msg ?? d.message ?? d.error ?? data.message ?? "";
+    if (ok && orderId != null) return { ok: true, pasti: true, orderId: String(orderId), pesan };
+    if (ok) return { ok: false, pasti: false, pesan: `panel menjawab sukses tanpa ID order: ${String(pesan).slice(0, 80)}` };
+    return { ok: false, pasti: true, pesan: String(pesan || "ditolak tanpa keterangan") };
+}
+
+function smmBatalTombol() { return { inline_keyboard: [[{ text: "❌ Batal", callback_data: "smo_batal" }]] }; }
+
+async function smmMulaiOrder(chatId, serviceId) {
+    const s = globalServices.find(x => String(x.id) === String(serviceId));
+    if (!s) return bot.sendMessage(chatId, "❌ Layanan tidak ditemukan. Daftar layanan mungkin baru diperbarui, silakan cari lagi.", { reply_markup: { inline_keyboard: [[{ text: "🔎 Cari Kategori", callback_data: "kat" }]] } });
+    smmMode.delete(chatId);
+    userSessions[chatId] = { type: "smm_order", step: "smm_link", serviceId: String(s.id) };
+    const komentar = smmButuhKomentar(s);
+    return bot.sendMessage(chatId,
+        `<blockquote>🛒 <b>ORDER SMM</b>\n━━━━━━━━━━━━━━━━━━\n` +
+        `📦 <b>${smmEsc(s.name)}</b>\n📂 ${smmEsc(s.category || "-")}\n` +
+        `💰 ${smmRp(smmHargaPer1k(s))} / 1.000\n📊 Min ${Number(s.min).toLocaleString("id-ID")} • Max ${Number(s.max).toLocaleString("id-ID")}` +
+        (komentar ? `\n💬 Layanan komentar: 1 baris = 1 komentar` : "") +
+        `</blockquote>\n🔗 Kirim <b>link / URL target</b> (akun harus publik):`,
+        { parse_mode: "HTML", reply_markup: smmBatalTombol() });
+}
+
+async function smmTampilRingkasan(chatId) {
+    const ses = userSessions[chatId];
+    const s = globalServices.find(x => String(x.id) === ses.serviceId);
+    if (!s) { delete userSessions[chatId]; return bot.sendMessage(chatId, "❌ Layanan tidak ditemukan, silakan order ulang."); }
+    ses.step = "smm_konfirm";
+    ses.harga = smmTotal(s, ses.quantity);
+    ses.paket = `SMM ${s.name} x${ses.quantity}`;
+    const komen = ses.komentar ? `\n💬 Komentar: ${ses.quantity} baris` : "";
+    return bot.sendMessage(chatId,
+        `<blockquote>🧾 <b>RINGKASAN PESANAN</b>\n━━━━━━━━━━━━━━━━━━\n` +
+        `📦 Layanan: <b>${smmEsc(s.name)}</b>\n🔗 Target: <code>${smmEsc(ses.target)}</code>\n` +
+        `🔢 Jumlah: <b>${Number(ses.quantity).toLocaleString("id-ID")}</b>${komen}\n` +
+        `💰 Harga: ${smmRp(smmHargaPer1k(s))} / 1.000\n━━━━━━━━━━━━━━━━━━\n💵 Total: <b>${smmRp(ses.harga)}</b></blockquote>\n` +
+        `Pilih cara bayar, pesanan langsung diproses setelah pembayaran berhasil:`,
+        {
+            parse_mode: "HTML", reply_markup: { inline_keyboard: [
+                [{ text: "🛒 Pesan • Bayar Saldo", callback_data: "smo_saldo", style: "success" }],
+                [{ text: "⚡ Pesan • QRIS 1 (Fast)", callback_data: "smo_qris", style: "success" }],
+                [{ text: "❌ Batal", callback_data: "smo_batal" }]
+            ] }
+        });
+}
+
+// Jalankan order setelah dibayar. Gagal pasti -> lempar error (pemanggil mengembalikan dana).
+// Gagal tidak pasti -> tidak dilempar: admin cek manual supaya tidak terjadi order jalan + dana kembali.
+async function smmProsesSetelahBayar(chatId, ses, refId) {
+    const s = globalServices.find(x => String(x.id) === String(ses.serviceId)) || { name: ses.serviceId };
+    await bot.sendMessage(chatId, "⏳ Memproses pesanan...").catch(() => {});
+    const hasil = await smmBuatOrder({ serviceId: ses.serviceId, target: ses.target, quantity: ses.quantity, komentar: ses.komentar });
+    const rec = { at: new Date().toISOString(), userId: chatId, ref: refId, serviceId: ses.serviceId, layanan: s.name, target: ses.target, quantity: ses.quantity, total: ses.harga, orderId: hasil.orderId || null, status: hasil.ok ? "SUKSES" : hasil.pasti ? "DITOLAK" : "PERLU_CEK", pesan: hasil.pesan };
+    smmCatatOrder(rec);
+    if (hasil.ok) {
+        await bot.sendMessage(chatId,
+            `<blockquote>✅ <b>PESANAN BERHASIL DIBUAT</b>\n━━━━━━━━━━━━━━━━━━\n🆔 ID Pesanan: <code>${hasil.orderId}</code>\n📦 ${smmEsc(s.name)}\n🔗 <code>${smmEsc(ses.target)}</code>\n🔢 ${Number(ses.quantity).toLocaleString("id-ID")}\n💵 ${smmRp(ses.harga)}\n\nPesanan sedang diproses panel. Simpan ID pesanan untuk cek status / refill.</blockquote>`,
+            { parse_mode: "HTML", reply_markup: { inline_keyboard: [[{ text: "🛍 Order Lagi", callback_data: "kat", style: "success" }]] } }).catch(() => {});
+        bot.sendMessage(settings.adminId, `<blockquote>💎 <b>INCOME: SMM</b>\n━━━━━━━━━━━━━━━━━━\n🆔 User: <code>${chatId}</code>\n📦 ${smmEsc(s.name)}\n🔢 ${ses.quantity} • ${smmRp(ses.harga)}\n🧾 Order panel: <code>${hasil.orderId}</code> • Ref: <code>${refId}</code></blockquote>`, { parse_mode: "HTML" }).catch(() => {});
+        return;
+    }
+    if (!hasil.pasti) {
+        await bot.sendMessage(chatId, `⚠️ Server SMM tidak memberi jawaban yang jelas, jadi status pesananmu belum pasti.\nAdmin akan mengecek dan memproses atau mengembalikan dana. Ref: <code>${refId}</code>`, { parse_mode: "HTML" }).catch(() => {});
+        bot.sendMessage(settings.adminId, `<blockquote>⚠️ <b>ORDER SMM PERLU DICEK</b>\n🆔 User: <code>${chatId}</code>\n📦 ${smmEsc(s.name)} (ID ${ses.serviceId})\n🔗 <code>${smmEsc(ses.target)}</code>\n🔢 ${ses.quantity} • ${smmRp(ses.harga)} (sudah dibayar)\n🧾 Ref: <code>${refId}</code>\n❗ ${smmEsc(hasil.pesan)}\n\nCek di dashboard panel: kalau order tidak ada, kembalikan dana user.</blockquote>`, { parse_mode: "HTML" }).catch(() => {});
+        return;
+    }
+    if (/saldo|balance|insufficient/i.test(hasil.pesan)) {
+        bot.sendMessage(settings.adminId, `<blockquote>⚠️ <b>SALDO PANEL SMM HABIS</b>\n${smmEsc(hasil.pesan)}\nOrder user ${chatId} ditolak & dana dikembalikan.</blockquote>`, { parse_mode: "HTML" }).catch(() => {});
+    }
+    const e = new Error(smmTerjemahError(hasil.pesan));
+    e.detailPanel = hasil.pesan;
+    throw e;
+}
+
+async function smmBayarSaldo(query) {
+    const chatId = query.message.chat.id;
+    const userId = query.from.id;
+    const ses = userSessions[chatId];
+    if (!ses || ses.type !== "smm_order" || ses.step !== "smm_konfirm") {
+        return bot.answerCallbackQuery(query.id, { text: "Sesi pesanan sudah berakhir, silakan order ulang.", show_alert: true });
+    }
+    if (smmOrderLock.has(userId)) return bot.answerCallbackQuery(query.id, { text: "⏳ Pesanan sebelumnya masih diproses...", show_alert: true });
+    smmOrderLock.add(userId);
+    try {
+        await bot.answerCallbackQuery(query.id, { text: "Memproses..." }).catch(() => {});
+        const pesanan = { ...ses };
+        const potong = await potongSaldoReal(userId, pesanan.harga, `Order ${pesanan.paket}`);
+        if (!potong || !potong.status) {
+            return bot.sendMessage(chatId, `❌ Pembayaran saldo gagal: ${(potong && (potong.msg || potong.message)) || "saldo tidak cukup"}\n💰 Total: ${smmRp(pesanan.harga)}\n\nBayar langsung pakai QRIS, atau top up saldo dulu.`, {
+                reply_markup: { inline_keyboard: [
+                    [{ text: "⚡ Pesan • QRIS 1 (Fast)", callback_data: "smo_qris", style: "success" }],
+                    [{ text: "➕ Top Up Saldo", callback_data: "menu_deposit", style: "success" }]
+                ] }
+            });
+        }
+        delete userSessions[chatId];
+        await bot.deleteMessage(chatId, query.message.message_id).catch(() => {});
+        const refId = `SMM-${Date.now()}`;
+        try {
+            await smmProsesSetelahBayar(chatId, pesanan, refId);
+        } catch (e) {
+            const r = await refundSaldoReal(userId, pesanan.harga, `Refund ${refId} - ${e.detailPanel || e.message}`).catch(() => ({ status: false }));
+            if (!r || !r.status) bot.sendMessage(settings.adminId, `⚠️ REFUND SMM GAGAL user ${userId} ${smmRp(pesanan.harga)} (${refId})`).catch(() => {});
+            await bot.sendMessage(chatId, `❌ <b>Pesanan gagal</b>\n${smmEsc(e.message)}\n\n${r && r.status ? `↩️ Saldo ${smmRp(pesanan.harga)} sudah dikembalikan.` : "Admin akan mengembalikan saldo secara manual."}`, {
+                parse_mode: "HTML", reply_markup: { inline_keyboard: [[{ text: "🔎 Pilih Layanan Lain", callback_data: "kat", style: "success" }]] }
+            }).catch(() => {});
+        }
+    } finally {
+        smmOrderLock.delete(userId);
+    }
+}
+
+async function smmBayarQris(query) {
+    const chatId = query.message.chat.id;
+    const userId = query.from.id;
+    const ses = userSessions[chatId];
+    if (!ses || ses.type !== "smm_order" || !ses.harga) {
+        return bot.answerCallbackQuery(query.id, { text: "Sesi pesanan sudah berakhir, silakan order ulang.", show_alert: true });
+    }
+    userSessions[userId] = { ...ses, type: "smm", userId, chatId }; // tipe "smm" dikenali QRIS & handlePaymentSuccess
+    return bot.emit("callback_query", { ...query, data: "pay_qris_tripay" });
+}
+
+bot.on("callback_query", async (query) => {
+    const data = query.data || "";
+    if (!data.startsWith("smo_")) return;
+    if (menuTertutupUntuk(data, query.from.id)) return;
+    const chatId = query.message.chat.id;
+    try {
+        if (data === "smo_batal") {
+            delete userSessions[chatId];
+            await bot.answerCallbackQuery(query.id, { text: "Pesanan dibatalkan" }).catch(() => {});
+            await bot.deleteMessage(chatId, query.message.message_id).catch(() => {});
+            return bot.sendMessage(chatId, "❌ Pesanan SMM dibatalkan.", { reply_markup: { inline_keyboard: [[{ text: "🔎 Cari Layanan", callback_data: "kat", style: "success" }]] } });
+        }
+        if (data === "smo_saldo") return await smmBayarSaldo(query);
+        if (data === "smo_qris") return await smmBayarQris(query);
+    } catch (e) {
+        console.log("[SMM ORDER] callback error:", e.message);
+        bot.answerCallbackQuery(query.id, { text: "⚠️ Terjadi kesalahan, coba lagi.", show_alert: true }).catch(() => {});
+    }
+});
+
+// Input teks: link -> komentar / jumlah
+bot.on("message", async (msg) => {
+    const chatId = msg.chat.id;
+    const ses = userSessions[chatId];
+    if (!ses || ses.type !== "smm_order" || !["smm_link", "smm_komentar", "smm_qty"].includes(ses.step) || !msg.text || msg.text.startsWith("/")) return;
+    const s = globalServices.find(x => String(x.id) === ses.serviceId);
+    if (!s) { delete userSessions[chatId]; return bot.sendMessage(chatId, "❌ Layanan tidak ditemukan, silakan order ulang."); }
+    const min = Number(s.min) || 1, max = Number(s.max) || 1000000;
+    const teks = msg.text.trim();
+    try {
+        if (ses.step === "smm_link") {
+            if (!teks || /\s/.test(teks) || teks.length < 3 || teks.length > 500) {
+                return bot.sendMessage(chatId, "❌ Link/target tidak valid. Kirim satu link tanpa spasi, contoh: <code>https://www.tiktok.com/@username/video/123</code>", { parse_mode: "HTML", reply_markup: smmBatalTombol() });
+            }
+            ses.target = teks;
+            if (smmButuhKomentar(s)) {
+                ses.step = "smm_komentar";
+                return bot.sendMessage(chatId, `💬 Kirim <b>komentar</b>, <b>1 baris = 1 komentar</b> (tekan Enter untuk komentar berikutnya).\nJumlah komentar: min ${min.toLocaleString("id-ID")} • max ${max.toLocaleString("id-ID")}.\n\nContoh:\n<code>Keren banget!\nMantap kak\nSetuju 👍</code>`, { parse_mode: "HTML", reply_markup: smmBatalTombol() });
+            }
+            ses.step = "smm_qty";
+            return bot.sendMessage(chatId, `🔢 Masukkan <b>jumlah pesanan</b> (min ${min.toLocaleString("id-ID")} • max ${max.toLocaleString("id-ID")}):`, { parse_mode: "HTML", reply_markup: smmBatalTombol() });
+        }
+        if (ses.step === "smm_komentar") {
+            const baris = msg.text.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+            if (baris.length < min || baris.length > max) {
+                return bot.sendMessage(chatId, `❌ Jumlah komentar ${baris.length}, harus antara ${min.toLocaleString("id-ID")} dan ${max.toLocaleString("id-ID")}. Kirim ulang komentarnya (1 baris = 1 komentar).`, { reply_markup: smmBatalTombol() });
+            }
+            ses.komentar = baris.join("\n");
+            ses.quantity = baris.length;
+            return smmTampilRingkasan(chatId);
+        }
+        if (ses.step === "smm_qty") {
+            const n = Number(teks.replace(/[.,\s]/g, ""));
+            if (!Number.isInteger(n) || n < min || n > max) {
+                return bot.sendMessage(chatId, `❌ Jumlah harus angka antara ${min.toLocaleString("id-ID")} dan ${max.toLocaleString("id-ID")}. Ketik ulang:`, { reply_markup: smmBatalTombol() });
+            }
+            ses.quantity = n;
+            return smmTampilRingkasan(chatId);
+        }
+    } catch (e) {
+        console.log("[SMM ORDER] input error:", e.message);
+        bot.sendMessage(chatId, "⚠️ Terjadi kesalahan, coba lagi.").catch(() => {});
+    }
+});
+
+bot.on("callback_query", async (query) => {
+    const data = query.data || "";
+    if (!(data === "kat" || data.startsWith("sk|") || data === "sks|")) return;
+    if (menuTertutupUntuk(data, query.from.id)) return; // info maintenance dikirim handler utama
+    const chatId = query.message.chat.id;
+    try {
+        await bot.answerCallbackQuery(query.id).catch(() => {});
+        if (data === "kat") {
+            smmMode.add(chatId);
+            return await bot.sendMessage(chatId, "📝 Ketik kategori: instagram, tiktok, youtube, shopee, dll\n\nKetik /cancel untuk keluar.");
+        }
+        if (data === "sks|") {
+            const k = smmCariTerakhir[chatId];
+            if (!k) { smmMode.add(chatId); return await bot.sendMessage(chatId, "📝 Ketik kategori: instagram, tiktok, youtube, dll"); }
+            await bot.deleteMessage(chatId, query.message.message_id).catch(() => {});
+            return await smmKirimKategori(chatId, k);
+        }
+        const [, hash, page] = data.split("|");
+        const kategori = smmKategoriDari(hash);
+        if (!kategori) return await bot.sendMessage(chatId, "⚠️ Daftar layanan sudah diperbarui. Silakan cari kategori lagi.", { reply_markup: { inline_keyboard: [[{ text: "🔎 Cari Kategori", callback_data: "kat" }]] } });
+        return await smmKirimLayanan(chatId, query.message.message_id, kategori, parseInt(page) || 1);
+    } catch (e) {
+        console.log("[SMM] callback error:", e.message);
+    }
+});
 
 // Panggil pas bot nyala
 loadSMMServices();
@@ -760,7 +1206,8 @@ function saveUser(chatId, username) {
     return false;
 }
 
-function updateUserProfile(chatId, paketDibeli, usernamePanel) {
+// extra: { jenis: "panel" | "vps_shared" | "vps_dedicated", harga, host }
+function updateUserProfile(chatId, paketDibeli, usernamePanel, extra = {}) {
     const users = getUsers();
     if (!users[chatId]) return;
     if (!users[chatId].servers) users[chatId].servers = []; // Migrasi aman
@@ -777,7 +1224,11 @@ function updateUserProfile(chatId, paketDibeli, usernamePanel) {
         paket: paketDibeli,
         order_date: now.toLocaleString("id-ID", timeOptions),
         expired_date: expired.toLocaleString("id-ID", timeOptions),
-        expired_timestamp: expired.getTime() // Disimpan dalam hitungan milidetik agar mudah ditambah nanti
+        expired_timestamp: expired.getTime(), // Disimpan dalam hitungan milidetik agar mudah ditambah nanti
+        jenis: extra.jenis || "panel",
+        harga: Number(extra.harga) || undefined, // harga sewa 30 hari, dipakai hitung perpanjangan
+        host: extra.host || undefined,
+        reminded: []
     });
 
     fs.writeFileSync(usersFile, JSON.stringify(users, null, 2));
@@ -791,8 +1242,12 @@ function extendServer(chatId, serverIndex, addDays) {
     const server = users[chatId].servers[serverIndex];
     const timeOptions = { timeZone: "Asia/Jakarta", day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' };
 
-    // Tambah hari ke timestamp expired sebelumnya
-    const newExpiredTime = server.expired_timestamp + (addDays * 24 * 60 * 60 * 1000);
+    // Tambah hari dari expired lama; kalau sudah lewat / data lama tanpa timestamp, mulai dari sekarang
+    const lama = serverExpiredMs(server);
+    const dasar = Number.isFinite(lama) && lama > Date.now() ? lama : Date.now();
+    const newExpiredTime = dasar + (addDays * 24 * 60 * 60 * 1000);
+    server.reminded = [];
+    server.expiredNotified = false;
     const newExpiredDate = new Date(newExpiredTime);
 
     server.expired_timestamp = newExpiredTime;
@@ -801,6 +1256,101 @@ function extendServer(chatId, serverIndex, addDays) {
     fs.writeFileSync(usersFile, JSON.stringify(users, null, 2));
     return server.username_panel; // Kembalikan username panel untuk notif
 }
+// ====================================================
+// SERVER AKTIF: jenis, sisa waktu (hitung mundur), reminder H-3/H-2/H-1
+// ====================================================
+const JENIS_SERVER = { panel: "Panel", vps_shared: "VPS NAT", vps_dedicated: "VPS Dedicated" };
+const HARI_MS = 24 * 60 * 60 * 1000;
+function serverExpiredMs(srv) {
+    const ts = Number(srv && srv.expired_timestamp);
+    if (Number.isFinite(ts) && ts > 0) return ts;
+    return parseFlexibleDate(srv && srv.expired_date).getTime();
+}
+function serverJenis(srv) {
+    return JENIS_SERVER[srv.jenis] || (/vps/i.test(srv.paket || "") ? "VPS" : "Panel");
+}
+function serverSisa(ms) {
+    if (!Number.isFinite(ms)) return "Tanggal tidak valid";
+    const d = ms - Date.now();
+    if (d <= 0) return "Expired";
+    const h = Math.floor(d / HARI_MS), j = Math.floor((d % HARI_MS) / 3600000), m = Math.floor((d % 3600000) / 60000);
+    if (h > 0) return `${h} hari ${j} jam`;
+    if (j > 0) return `${j} jam ${m} menit`;
+    return `${m} menit`;
+}
+function serverTglWIB(ms) {
+    if (!Number.isFinite(ms)) return "-";
+    return new Date(ms).toLocaleString("id-ID", { timeZone: "Asia/Jakarta", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }).replace(/\./g, ":") + " WIB";
+}
+// Harga perpanjang per hari: harga sewa 30 hari / 30, default Rp 500 (panel)
+function serverHargaPerHari(srv) {
+    return srv && Number(srv.harga) > 0 ? Math.ceil(Number(srv.harga) / 30) : 500;
+}
+
+// Tabel server aktif sebagai rich message. tg-time format "r" = waktu relatif yang dihitung live oleh aplikasi Telegram.
+async function kirimTabelServer(chatId, servers) {
+    const esc = t => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const baris = (pakaiTimer) => servers.map((srv, i) => {
+        const ms = serverExpiredMs(srv);
+        const sisa = serverSisa(ms);
+        const hidup = Number.isFinite(ms) && ms > Date.now();
+        const sel = pakaiTimer && hidup ? `<tg-time unix="${Math.floor(ms / 1000)}" format="r">${esc(sisa)}</tg-time>` : (hidup ? esc(sisa) : `<b>${esc(sisa)}</b>`);
+        const ikon = !hidup ? "🔴" : ms - Date.now() <= 3 * HARI_MS ? "🟡" : "🟢";
+        return `  <tr><td>${i + 1}</td><td>${ikon} <code>${esc(srv.username_panel)}</code></td><td>${esc(serverJenis(srv))}</td><td>${esc(srv.paket)}</td><td>${sel}</td><td>${esc(serverTglWIB(ms))}</td></tr>`;
+    }).join("\n");
+    const html = (pakaiTimer) => `<h3>🟢 SERVER AKTIF</h3>\n<table bordered striped compact>\n` +
+        `  <tr><th>No</th><th>Server</th><th>Jenis</th><th>Paket</th><th>Sisa Waktu</th><th>Expired</th></tr>\n${baris(pakaiTimer)}\n</table>\n` +
+        `<p><i>🟢 aktif • 🟡 ≤ 3 hari • 🔴 expired. Masa sewa 30 hari, pengingat dikirim H-3, H-2, H-1.</i></p>`;
+    const markup = { reply_markup: { inline_keyboard: [
+        [{ text: "🔄 Perpanjang Server", callback_data: "extend_list", style: "success" }]
+    ] } };
+    try {
+        return await sendRichMessage(chatId, html(true), markup);
+    } catch (e1) {
+        try {
+            return await sendRichMessage(chatId, html(false), markup); // tanpa tg-time kalau tag ditolak
+        } catch (e2) {
+            const teks = `<blockquote>🟢 <b>SERVER AKTIF</b>\n` + servers.map((srv, i) => {
+                const ms = serverExpiredMs(srv);
+                return `\n${i + 1}. <code>${esc(srv.username_panel)}</code> (${esc(serverJenis(srv))})\n├ Paket: ${esc(srv.paket)}\n├ Sisa: <b>${esc(serverSisa(ms))}</b>\n└ Expired: ${esc(serverTglWIB(ms))}`;
+            }).join("\n") + `</blockquote>`;
+            return bot.sendMessage(chatId, teks, { parse_mode: "HTML", ...markup });
+        }
+    }
+}
+
+// Reminder hanya ke pemilik server. Cek tiap 15 menit, kirim sekali per tahap (H-3, H-2, H-1) + saat expired.
+async function cekReminderServer() {
+    let users;
+    try { users = getUsers(); } catch { return; }
+    let ubah = false;
+    for (const [chatId, u] of Object.entries(users)) {
+        if (!u || !Array.isArray(u.servers)) continue;
+        for (let idx = 0; idx < u.servers.length; idx++) {
+            const srv = u.servers[idx];
+            const ms = serverExpiredMs(srv);
+            if (!Number.isFinite(ms)) continue;
+            const sisaMs = ms - Date.now();
+            const tombol = { reply_markup: { inline_keyboard: [[{ text: "🔄 Perpanjang Server", callback_data: `ext_ui_${idx}_30`, style: "success" }]] } };
+            if (!Array.isArray(srv.reminded)) srv.reminded = [];
+            if (sisaMs <= 0) {
+                if (srv.expiredNotified) continue;
+                srv.expiredNotified = true; ubah = true;
+                bot.sendMessage(chatId, `<blockquote>🔴 <b>SERVER EXPIRED</b>\n\n${serverJenis(srv)} <code>${srv.username_panel}</code> (${srv.paket}) sudah habis masa sewanya pada ${serverTglWIB(ms)}.\nPerpanjang sekarang agar server tetap bisa dipakai.</blockquote>`, { parse_mode: "HTML", ...tombol }).catch(() => {});
+                continue;
+            }
+            const tahap = [1, 2, 3].find(n => sisaMs <= n * HARI_MS); // tahap terkecil yang sudah masuk
+            if (!tahap || srv.reminded.includes(tahap)) continue;
+            for (const n of [1, 2, 3]) if (n >= tahap && !srv.reminded.includes(n)) srv.reminded.push(n); // tahap yang terlewat tidak dikirim belakangan
+            ubah = true;
+            bot.sendMessage(chatId, `<blockquote>⏰ <b>PENGINGAT MASA SEWA (H-${tahap})</b>\n\n${serverJenis(srv)} <code>${srv.username_panel}</code>\n├ Paket: ${srv.paket}\n├ Sisa: <b>${serverSisa(ms)}</b>\n└ Expired: ${serverTglWIB(ms)}\n\nPerpanjang sebelum habis supaya server tidak berhenti.</blockquote>`, { parse_mode: "HTML", ...tombol }).catch(() => {});
+        }
+    }
+    if (ubah) saveUsers(users);
+}
+setInterval(() => cekReminderServer().catch(e => console.log("[REMINDER SERVER]", e.message)), 15 * 60 * 1000);
+setTimeout(() => cekReminderServer().catch(() => {}), 30 * 1000);
+
 // Fungsi untuk membersihkan teks agar aman dikirim sebagai HTML
 function escapeHTML(text) {
     return text
@@ -949,7 +1499,8 @@ Dear All, Kini Toko VPS &amp; Panel Legal telah bekerja sama dengan Brand Digita
     const kirimVoice = async () => {
         try {
             const voiceDir = path.join(__dirname, "voice");
-            const voiceFiles = fs.readdirSync(voiceDir).filter(file => /\.(ogg|oga)$/i.test(file));
+            // maintenance*.ogg khusus menu yang ditutup, _*.ogg file sementara konversi
+            const voiceFiles = fs.readdirSync(voiceDir).filter(file => /\.(ogg|oga)$/i.test(file) && !/^(maintenance|_)/i.test(file));
             if (voiceFiles.length === 0) throw new Error("Tidak ada file .ogg/.oga di folder voice");
             const voiceFile = voiceFiles[Math.floor(Math.random() * voiceFiles.length)];
             await bot.sendVoice(chatId, path.join(voiceDir, voiceFile));
@@ -996,7 +1547,7 @@ const keyboardMenuKedua = {
     inline_keyboard: [
         [
             { text: "🛍 SMM Panel", callback_data: "smm", style: "success" },
-            { text: "📱 𝙽𝚘𝚖𝚘𝚛 𝙾𝚃𝙿", callback_data: "menu_otp", style: "success" }
+            { text: "📱 𝙽𝚘𝚖𝚘𝚛 𝙾𝚃𝙿", callback_data: "pilih_otp_server", style: "success" }
         ],
         [
             { text: "🛍 𝙱𝚎𝚕𝚒 𝚅𝚙𝚜", callback_data: "menu_vps", style: "success" },
@@ -1639,7 +2190,7 @@ async function handlePaymentSuccess(chatId, session, orderId, messageId = null) 
         if (session.type === "deposit") {
             // Saldo yang dipakai bayar ada di website (getSaldoReal / potongSaldoReal),
             // jadi deposit dikreditkan ke sana. updateSaldo lokal akan tertimpa getSaldoReal.
-            const kredit = await refundSaldoReal(chatId, session.amount, `Deposit ${orderId}`).catch(e => ({ status: false, msg: e.message }));
+            const kredit = await kreditSaldoWebsite(chatId, session.amount, `Deposit ${orderId}`);
             if (!kredit || !kredit.status) {
                 // Jangan throw: catch pemanggil akan refund lagi ke endpoint yang sama (risiko kredit ganda)
                 const alasan = (kredit && (kredit.msg || kredit.message)) || "tidak diketahui";
@@ -1746,9 +2297,11 @@ async function handlePaymentSuccess(chatId, session, orderId, messageId = null) 
             if (session.type === "vps_shared") {
                 // Ini yang bener buat VPS SHARED - pakai hostname & password request user
                 await autoCreateVPSShared(chatId, session.hostname, session.password, session.paket);
+                updateUserProfile(chatId, session.paket, session.hostname, { jenis: "vps_shared", harga: session.harga, host: `${PUBLIC_IP}:${PUBLIC_PORT}` });
             } else {
                 // Ini baru buat DEDICATED (HostVDS Amsterdam)
                 await autoCreateVPS(chatId, session.username, session.paket);
+                updateUserProfile(chatId, session.paket, session.username, { jenis: "vps_dedicated", harga: session.harga });
             }
 
             bot.sendMessage(settings.adminId, `<blockquote>🖥️ <b>INCOME: VPS BARU</b>\n━━━━━━━━━━━━━━━━━━\n🆔 ID: <code>${chatId}</code>\n📦 Paket: ${session.paket}\n👤 Host: <code>${session.hostname || session.username}</code>\n🧾 Order ID: <code>${orderId}</code></blockquote>`, { parse_mode: "HTML" });
@@ -1780,7 +2333,39 @@ async function handlePaymentSuccess(chatId, session, orderId, messageId = null) 
             await autoCreatePanelTimed(chatId, session.paket, session.jam);
             bot.sendMessage(settings.adminId, `<blockquote>🕒 <b>INCOME: RENTAL PANEL</b>\n━━━━━━━━━━━━━━━━━━\n🆔 ID: <code>${chatId}</code>\n⏳ Durasi: ${session.jam} Jam\n🧾 Order ID: <code>${orderId}</code></blockquote>`, { parse_mode: "HTML" });
         }
-        // --- 8. SAFETY: KALAU TYPE GAK DIKENAL JANGAN PAKSA JADI PANEL ---
+        // --- 8. NOMOR OTP (HEROSMS) ---
+        // Gagal ambil nomor -> throw, pemanggil (QRIS 1) mengembalikan dana ke saldo
+        else if (session.type === "otp") {
+            try {
+                await otpAmbilNomor({
+                    userId: session.userId || chatId, chatId,
+                    service: session.service, country: session.country,
+                    cost: Number(session.cost), harga: Number(session.harga), username: session.tgUser
+                });
+            } catch (e) {
+                // Dana dikembalikan ke saldo oleh pemanggil; setelah itu tawarkan harga lain (bisa dibayar pakai saldo tadi)
+                if (OTP_HABIS_DI_HARGA.includes(e.message)) setTimeout(() => otpTawarkanHargaLain(chatId, session.service, session.country, Number(session.cost)), 1500);
+                throw e;
+            }
+        }
+        // --- 8b. NOMOR OTP SERVER 2 ---
+        else if (session.type === "otp2") {
+            try {
+                await otp2AmbilNomor({
+                    userId: session.userId || chatId, chatId,
+                    service: session.service, country: session.country,
+                    cost: Number(session.cost), pid: session.pid, harga: Number(session.harga), username: session.tgUser
+                });
+            } catch (e) {
+                if (OTP2_HABIS_DI_HARGA.includes(e.message)) setTimeout(() => otp2TawarkanHargaLain(chatId, session.service, session.country, Number(session.cost), session.pid), 1500);
+                throw e;
+            }
+        }
+        // --- 8c. ORDER SMM (gagal pasti -> throw, pemanggil QRIS mengembalikan dana) ---
+        else if (session.type === "smm") {
+            await smmProsesSetelahBayar(chatId, session, orderId);
+        }
+        // --- 9. SAFETY: KALAU TYPE GAK DIKENAL JANGAN PAKSA JADI PANEL ---
         else {
             throw new Error(`Tipe order tidak dikenal: ${session.type} | paket: ${session.paket}`);
         }
@@ -2161,6 +2746,16 @@ bot.sendMessage(LOG_CHANNEL_ID, logText, { parse_mode: "HTML" }).catch(e => {
     const data = query.data;
     const chatId = query.message.chat.id;
     const messageId = query.message.message_id;
+    // Menu yang ditutup admin (/tutupmenu): balas info maintenance + voice, jangan proses
+    {
+        const sesi = userSessions[query.from.id] || userSessions[chatId];
+        const menuTutup = menuTertutupUntuk(data, query.from.id, sesi);
+        if (menuTutup) {
+            await bot.answerCallbackQuery(query.id, { text: `🔧 Menu ${MENU_GRUP[menuTutup].nama} sedang ditutup (maintenance)` }).catch(() => {});
+            await kirimInfoMenuTutup(chatId, menuTutup);
+            return;
+        }
+    }
 const caption = query.message.caption || query.message.text || '';
 const matchKat = caption.match(/Kategori: (.+)/i);
   const katFromCap = matchKat? matchKat[1] : '';
@@ -2250,64 +2845,9 @@ const userId = query.from.id;
   // BARU: Klik layanan munculin deskripsi
 // 1. DETAIL LAYAN o|
 if (data.startsWith('o|')) {
-  try {
-    await bot.answerCallbackQuery(query.id);
-    const chatId = query.message.chat.id;
-
-    const serviceId = data.split('|')[1];
-    const service = globalServices.find(s => s.id == serviceId);
-
-    if (!service) {
-      return bot.sendMessage(chatId, '❌ Layanan tidak ditemukan');
-    }
-
-    let katFromCap = service.category || 'Kategori';
-    let type = service.type || 'Umum';
-
-    // Cuma escape 3 karakter bahaya HTML, JANGAN HAPUS TAG
-    // Biar <br>, <b>, <i>, <blockquote>, <img> tetep jalan
-    const clean = service.description
-     ? service.description
-         .replace(/&/g, '&amp;')
-         .replace(/</g, '&lt;')
-         .replace(/>/g, '&gt;')
-      : 'Tidak ada deskripsi';
-
-    // Tapi kalo mau tag <br><b><i><blockquote><img> tetep jalan,
-    // balikin lagi tag yg aman ini setelah di-escape
-    const safeDesc = clean
-     .replace(/&lt;br&gt;/g, '<br>')
-     .replace(/&lt;b&gt;/g, '<b>').replace(/&lt;\/b&gt;/g, '</b>')
-     .replace(/&lt;i&gt;/g, '<i>').replace(/&lt;\/i&gt;/g, '</i>')
-     .replace(/&lt;blockquote&gt;/g, '<blockquote>').replace(/&lt;\/blockquote&gt;/g, '</blockquote>')
-     .replace(/&lt;img /g, '<img ').replace(/&gt;/g, '>'); // img tag dibalikin
-
-    const text = `<b>📋 Detail Layanan</b>\n\n` +
-      `<b>Nama:</b> ${service.name}\n` +
-      `<b>Kategori:</b> ${katFromCap}\n` +
-      `<b>Tipe:</b> ${type}\n` +
-      `<b>Harga:</b> Rp${service.price.toLocaleString('id-ID')}/1k\n` +
-      `<b>Min:</b> ${service.min} | <b>Max:</b> ${service.max}\n` +
-      `<b>Status:</b> ${service.status? '✅ Aktif' : '❌ Nonaktif'}\n\n` +
-      `<b>📝 Deskripsi:</b>\n${safeDesc}\n\n` +
-      `<i>Klik tombol di bawah untuk order</i>`;
-
-    const btn = [
-      [{ text: '🛒 Order Sekarang', callback_data: `c|${serviceId}` }],
-      [{ text: '⬅️ Kembali ke List', callback_data: `t|${encodeURIComponent(katFromCap)}|${encodeURIComponent(type)}|1` }]
-    ];
-
-    // PAKE SENDMESSAGE AJA, GA PAKE SETTINGS.PP
-    await bot.sendMessage(chatId, text, {
-      parse_mode: 'HTML',
-      disable_web_page_preview: false,
-      reply_markup: { inline_keyboard: btn }
-    });
-
-  } catch(e) {
-    console.error('ERROR o|:', e.message);
-    await bot.answerCallbackQuery(query.id, {text: '❌ Gagal buka detail', show_alert: true});
-  }
+  // Klik layanan -> langsung minta link target (lalu komentar/jumlah, ringkasan, tombol Pesan)
+  await bot.answerCallbackQuery(query.id).catch(() => {});
+  await smmMulaiOrder(chatId, data.split('|')[1]);
 }
 
 // 2. TOMBOL BACK back|
@@ -2529,16 +3069,14 @@ if (query.data.startsWith('do_')) {
         // ====================================================
         if (data === "buy_jasa_install") {
             const hargaAsli = 10000; // Harga Fix 10rb
-            const estimasiFee = Math.ceil(hargaAsli * 0.007); 
-            const totalBayar = hargaAsli + estimasiFee;
 
             const textDetail = `<blockquote>📋 <b>DETAIL JASA INSTALL VPS</b>
 
 📦 <b>Produk:</b> Auto Install Pterodactyl + SSL
 💰 <b>Biaya Jasa:</b> Rp ${hargaAsli.toLocaleString('id-ID')}
-💳 <b>Fee Admin:</b> ~Rp ${estimasiFee.toLocaleString('id-ID')}
 ━━━━━━━━━━━━━━━━━━
-🧾 <b>Total Bayar:</b> <b>Rp ${totalBayar.toLocaleString('id-ID')}</b>
+🧾 <b>Total Bayar:</b> <b>Rp ${hargaAsli.toLocaleString('id-ID')}</b>
+<i>Bayar QRIS: + fee QRIS dihitung otomatis oleh gateway (terlihat di QR)</i>
 
 <i>Apakah data pesanan di atas sudah benar? Jika sudah silakan klik lanjutkan dibawah ini</i></blockquote>`;
 
@@ -2583,7 +3121,7 @@ if (query.data.startsWith('do_')) {
                     inline_keyboard: [
                         [{ text: "⚡ 𝘘𝘳 𝘚𝘦𝘳𝘷𝘦𝘳 1 (𝘍𝘢𝘴𝘵)", callback_data: "pay_qris_tripay" }],
                     //    [{ text: "Crypto USD", callback_data: "qr_server_3" }],
-                    [{ text: `💳 Bayar Pakai Saldo (Rp ${mySaldo.toLocaleString()})`, callback_data: "pay_via_saldo", style: "success" }],
+                    [{ text: "💳 Bayar Pakai Saldo", callback_data: "pay_via_saldo", style: "success" }],
                         [{ text: "« 𝘉𝘢𝘵𝘢𝘭𝘬𝘢𝘯 𝘖𝘳𝘥𝘦𝘳", callback_data: "back_to_main" }]
                     ]
                 }
@@ -2786,9 +3324,6 @@ if (query.data.startsWith('do_')) {
         // KETIKA USER KLIK TOMBOL "KLAIM VOUCHER"
         // ====================================================
 if (data.startsWith("klaimvc_")) {
-    const dbUsers = getUsers();
-    const mySaldo = await getSaldoReal(chatId); // Ambil saldo terbaru
-
     const kode = data.split("_")[1];
     const voucher = activeVouchers[kode];
 
@@ -2804,22 +3339,14 @@ if (data.startsWith("klaimvc_")) {
     const hargaSetelahDiskon = hargaNormal - potonganDiskon;
     
     // Hitung Fee (Hanya jika bayar via QRIS)
-    const estimasiFee = Math.ceil(hargaSetelahDiskon * 0.007);
-    const totalBayarQRIS = hargaSetelahDiskon + estimasiFee;
 
     // Simpan ke sesi agar saat input username bot ingat ini adalah paket promo
     userSessions[chatId] = {
         type: "panel",
         paket: `${voucher.paket} (PROMO ${kode})`,
         harga: hargaSetelahDiskon, // Harga yang akan dipotong dari saldo
-        totalQRIS: totalBayarQRIS,
         step: "confirming_promo"
     };
-
-    // Cek kecukupan saldo
-    const statusSaldo = mySaldo >= hargaSetelahDiskon 
-        ? "🟢 <b>Saldo Cukup</b> (Bayar instan tanpa fee)" 
-        : `🔴 <b>Saldo Kurang</b> (Butuh Top Up)`;
 
     const textDetailPromo = `<blockquote>📋 <b>DETAIL PESANAN (PROMO)</b>
 
@@ -2828,10 +3355,8 @@ if (data.startsWith("klaimvc_")) {
 
 💰 <b>Harga Normal:</b> <del>Rp ${hargaNormal.toLocaleString('id-ID')}</del>
 📉 <b>Diskon ${diskonPersen}%:</b> -Rp ${potonganDiskon.toLocaleString('id-ID')}
-💸 <b>Est. Total (QRIS):</b> Rp ${totalBayarQRIS.toLocaleString('id-ID')}
+💸 <b>Total Bayar:</b> Rp ${hargaSetelahDiskon.toLocaleString('id-ID')} <i>(QRIS: + fee QRIS dihitung otomatis oleh gateway)</i>
 ━━━━━━━━━━━━━━━━━━
-💳 <b>Saldo Anda:</b> Rp ${mySaldo.toLocaleString('id-ID')}
-ℹ️ <b>Status Saldo:</b> ${statusSaldo}
 
 <i>Apakah detail pesanan di atas sudah benar? Klik Lanjutkan untuk mengisi data username.</i></blockquote>`;
 
@@ -2864,42 +3389,29 @@ if (data.startsWith("klaimvc_")) {
         // ====================================================
         
         if (data.startsWith("buy_")) {
-    const dbUsers = getUsers();
-    const mySaldo = await getSaldoReal(chatId); // Ambil saldo dari database
 
     const parts = data.split("_");
     const detailPaket = parts[1]; // Contoh: "Started 1GB"
     const hargaAsli = parseInt(parts[2]); // Contoh: 25000
 
     // Rumus Estimasi Fee Pakasir (Hanya berlaku jika bayar via QRIS)
-    const estimasiFee = Math.ceil(hargaAsli * 0.007); 
-    const totalBayarQRIS = hargaAsli + estimasiFee;
 
     // Simpan ke sesi sementara (PENTING: Simpan harga asli untuk potongan saldo nanti)
     userSessions[chatId] = {
         type: "panel", // Tipe order
         paket: detailPaket,
         harga: hargaAsli,
-        fee: estimasiFee,
-        totalQRIS: totalBayarQRIS,
         step: "confirming_order"
     };
-
-    // Tentukan status saldo (Cukup atau Kurang)
-    const statusSaldo = mySaldo >= hargaAsli 
-        ? "🟢 <b>Saldo Cukup</b> (Potongan Tanpa Fee Admin)" 
-        : `🔴 <b>Saldo Kurang</b> (Butuh Top Up)`;
 
     const textDetail = `<blockquote>📋 <b>DETAIL PESANAN ANDA</b>
 
 📦 <b>Produk:</b> Panel Pterodactyl - ${detailPaket}
 💰 <b>Harga Paket:</b> Rp ${hargaAsli.toLocaleString('id-ID')}
-💸 <b>Estimasi Total (QRIS):</b> Rp ${totalBayarQRIS.toLocaleString('id-ID')}
+💸 <b>Total Bayar:</b> Rp ${hargaAsli.toLocaleString('id-ID')} <i>(QRIS: + fee QRIS dihitung otomatis oleh gateway)</i>
 ━━━━━━━━━━━━━━━━━━
-💳 <b>Saldo Anda:</b> Rp ${mySaldo.toLocaleString('id-ID')}
-ℹ️ <b>Status Saldo:</b> ${statusSaldo}
 
-<i>Klik Lanjutkan jika pesanan sudah benar untuk mengisi data username panel Anda.</i></blockquote>`;
+<i>Klik Lanjutkan jika pesanan sudah benar untuk mengisi data username panel Anda. Metode pembayaran dipilih setelahnya.</i></blockquote>`;
 
     const btnConfirm = {
         reply_markup: {
@@ -2943,16 +3455,14 @@ if (data.startsWith("ext_")) {
     }
 
     const targetServer = myProfile.servers[srvIndex];
-    const mySaldo = await getSaldoReal(chatId);
 
     // Logika Tombol Tambah / Kurang Hari
     if (action === "plus") days++;
     if (action === "min" && days > 1) days--;
 
-    // Perhitungan Harga (Rp 500 / Hari)
-    const hargaPerpanjang = days * 500;
-    const estimasiFee = Math.ceil(hargaPerpanjang * 0.007);
-    const totalBayarQRIS = hargaPerpanjang + estimasiFee;
+    // Harga per hari: panel Rp 500, VPS = harga sewa 30 hari / 30
+    const perHari = serverHargaPerHari(targetServer);
+    const hargaPerpanjang = days * perHari;
 
     // ==========================================
     // 1. JIKA USER KLIK "LANJUTKAN" (PILIH PAYMENT)
@@ -2964,7 +3474,6 @@ if (data.startsWith("ext_")) {
             days: days,
             paket: `Perpanjang [${targetServer.username_panel}] ${days} Hari`,
             harga: hargaPerpanjang, // Harga asli untuk potong saldo
-            totalQRIS: totalBayarQRIS, // Harga + fee untuk QRIS
             username: targetServer.username_panel
         };
 
@@ -2972,15 +3481,13 @@ if (data.startsWith("ext_")) {
                       `🖥 Server: <code>${targetServer.username_panel}</code>\n` +
                       `⏳ Durasi: +${days} Hari\n` +
                       `💰 Harga: Rp ${hargaPerpanjang.toLocaleString('id-ID')}\n` +
-                      `━━━━━━━━━━━━━━━━━━\n` +
-                      `💳 Saldo Anda: Rp ${mySaldo.toLocaleString('id-ID')}</blockquote>\n\n` +
-                      `<i>Silakan pilih metode pembayaran:</i>`;
+                      `</blockquote>\n\n<i>Silakan pilih metode pembayaran:</i>`;
 
         const btnPayment = {
             reply_markup: {
                 inline_keyboard: [
                     // Tombol Bayar Pakai Saldo
-                    [{ text: `💳 Bayar Pakai Saldo (Rp ${mySaldo.toLocaleString()})`, callback_data: "pay_via_saldo", style: "success" }],
+                    [{ text: "💳 Bayar Pakai Saldo", callback_data: "pay_via_saldo", style: "success" }],
                     // Metode Luar
                     [
                         { text: "⚡ QRIS FAST", callback_data: "pay_qris_tripay", style: "success" },
@@ -2991,7 +3498,11 @@ if (data.startsWith("ext_")) {
             }
         };
 
-        await bot.editMessageCaption(textPay, { chat_id: chatId, message_id: messageId, parse_mode: "HTML", ...btnPayment }).catch(()=>{});
+        // Tombol bisa datang dari foto (profil) atau pesan teks (reminder / tabel server)
+        await bot.editMessageCaption(textPay, { chat_id: chatId, message_id: messageId, parse_mode: "HTML", ...btnPayment })
+            .catch(() => bot.editMessageText(textPay, { chat_id: chatId, message_id: messageId, parse_mode: "HTML", ...btnPayment }))
+            .catch(() => bot.sendMessage(chatId, textPay, { parse_mode: "HTML", ...btnPayment }))
+            .catch(() => {});
         await bot.answerCallbackQuery(query.id);
         return;
     }
@@ -2999,21 +3510,18 @@ if (data.startsWith("ext_")) {
     // ==========================================
     // 2. TAMPILAN INTERAKTIF (+ / - HARI)
     // ==========================================
-    const statusSaldo = mySaldo >= hargaPerpanjang 
-        ? "🟢 <b>Saldo Cukup</b>" 
-        : `🔴 <b>Saldo Kurang</b> (Butuh TopUp)`;
 
     const textExtend = `<blockquote>🔄 <b>ATUR DURASI PERPANJANG</b>
 
 🖥 <b>Detail Server:</b>
 ├ User: <code>${targetServer.username_panel}</code>
-└ Expired: <b>${targetServer.expired_date}</b>
+├ Jenis: ${serverJenis(targetServer)}
+├ Sisa: <b>${serverSisa(serverExpiredMs(targetServer))}</b>
+└ Expired: <b>${serverTglWIB(serverExpiredMs(targetServer))}</b>
 
-⏳ <b>Tambah:</b> ${days} Hari (Rp 500/hr)
+⏳ <b>Tambah:</b> ${days} Hari (Rp ${perHari.toLocaleString('id-ID')}/hr)
 ━━━━━━━━━━━━━━━━━━
-💰 Harga Sewa: Rp ${hargaPerpanjang.toLocaleString('id-ID')}
-💳 Saldo Anda: Rp ${mySaldo.toLocaleString('id-ID')}
-ℹ️ Status: ${statusSaldo}</blockquote>`;
+💰 Harga Sewa: Rp ${hargaPerpanjang.toLocaleString('id-ID')}</blockquote>`;
 
     const btnInteractive = {
         reply_markup: {
@@ -3029,7 +3537,11 @@ if (data.startsWith("ext_")) {
         }
     };
 
-    await bot.editMessageCaption(textExtend, { chat_id: chatId, message_id: messageId, parse_mode: "HTML", ...btnInteractive }).catch(()=>{});
+    // Tombol bisa datang dari foto (profil) atau pesan teks (reminder / tabel server)
+    await bot.editMessageCaption(textExtend, { chat_id: chatId, message_id: messageId, parse_mode: "HTML", ...btnInteractive })
+        .catch(() => bot.editMessageText(textExtend, { chat_id: chatId, message_id: messageId, parse_mode: "HTML", ...btnInteractive }))
+        .catch(() => bot.sendMessage(chatId, textExtend, { parse_mode: "HTML", ...btnInteractive }))
+        .catch(() => {});
     await bot.answerCallbackQuery(query.id);
     return;
 }
@@ -3077,7 +3589,6 @@ if (data === "check_vps_stock") {
     await bot.answerCallbackQuery(query.id, { text: "⏳ Sedang mengecek ketersediaan di server..." });
 
     const store = getStore();
-    const mySaldo = await getSaldoReal(chatId);
 
     // Gabungin data lama (dari /setvps) + inventory baru biar gak hilang
     let inventory = store.vps_inventory || { dedicated: {}, shared: {} };
@@ -3149,7 +3660,6 @@ if (data === "check_vps_stock") {
         textTersedia += `\n`;
     }
 
-    textTersedia += `💳 Saldo Anda: <b>Rp ${mySaldo.toLocaleString('id-ID')}</b>\n`;
     textTersedia += `<i>Pilih paket di bawah sesuai RAM yang ready.</i></blockquote>`;
 
     buttons.push([{ text: "« Kembali", callback_data: "menu_vps" }]);
@@ -3319,7 +3829,7 @@ case "pay_qris_tripay": {
     const chatIdOrder = query.message ? query.message.chat.id : userId;
     // Cek 2 key biar gak hilang sesi (sama seperti pay_via_saldo)
     const session = userSessions[userId] || userSessions[chatIdOrder];
-    const tipeDikenal = ["deposit", "extend", "patungan", "jasa_install", "panel", "hourly", "vps"];
+    const tipeDikenal = ["deposit", "extend", "patungan", "jasa_install", "panel", "hourly", "vps", "otp", "otp2", "smm"];
 
     if (!session || !session.harga) {
         return bot.answerCallbackQuery(query.id, { text: "⚠️ Harga tidak ditemukan, Silakan order ulang.", show_alert: true });
@@ -3342,7 +3852,12 @@ case "pay_qris_tripay": {
         if (messageId) await bot.deleteMessage(chatIdOrder, messageId).catch(() => {});
 
         const d = res.data;
-        const caption = `💳 <b>PEMBAYARAN QRIS</b>\n\n💵 Total: <b>Rp ${Number(d.amount).toLocaleString("id-ID")}</b>\n🆔 Referensi: <code>${d.reference}</code>\n\n<i>Scan QR di atas dengan e-wallet atau m-banking. Berlaku 30 menit.</i>`;
+        // Rincian dari gateway: d.amount = yang dibayar user (nominal + fee gateway)
+        const totalGateway = Number(d.amount) || amount;
+        const feeGateway = Number(d.fee_customer ?? (totalGateway - amount)) || 0;
+        const caption = `💳 <b>PEMBAYARAN QRIS</b>\n\n💰 Nominal: Rp ${amount.toLocaleString("id-ID")}\n` +
+            `🧾 Fee gateway: Rp ${feeGateway.toLocaleString("id-ID")}\n━━━━━━━━━━━━━━\n` +
+            `💵 Total Bayar: <b>Rp ${totalGateway.toLocaleString("id-ID")}</b>\n🆔 Referensi: <code>${d.reference}</code>\n\n<i>Scan QR di atas dengan e-wallet atau m-banking. Berlaku 30 menit.</i>`;
         const kb = {
             reply_markup: {
                 inline_keyboard: [
@@ -3694,67 +4209,24 @@ case "p_dur_168": {
   textProfil += `🎰 Gacha Hari Ini: <b>${gachaSisa > 0? gachaSisa : 0}x</b>`;
   textProfil += textFreelance;
   textProfil += textPet;
-  textProfil += `\n\n🟢 <b>SERVER AKTIF:</b>\n`;
-
-  // ... Lanjutan btnProfil sama server list lu biarin sama persis ...
+  const daftarServer = Array.isArray(myProfile.servers) ? myProfile.servers : [];
+  const aktif = daftarServer.filter(srv => serverExpiredMs(srv) > Date.now()).length;
+  textProfil += `\n\n🟢 <b>SERVER AKTIF:</b> ${daftarServer.length ? `${aktif} aktif dari ${daftarServer.length} server (rincian di tabel bawah)` : "<i>Belum ada server yang aktif.</i>"}`;
 
   let btnProfil = [
     [
-      { text: "🎮 Gacha Harian", callback_data: "menu_gacha" },
-      { text: "➕ Top Up Saldo", callback_data: "menu_deposit" }
+      { text: "🎮 Gacha Harian", callback_data: "menu_gacha", style: "success" },
+      { text: "➕ Top Up Saldo", callback_data: "menu_deposit", style: "success" }
     ],
     [
-      { text: "🐾 Kelola Pet", callback_data: "menu_pet" }
+      { text: "🐾 Kelola Pet", callback_data: "menu_pet", style: "success" }
     ],
     [
       { text: "« Kembali", callback_data: "back_to_main" }
     ]
   ];
-
-  if (!myProfile.servers || myProfile.servers.length === 0) {
-    textProfil += `<i>Belum ada panel yang aktif.</i>`;
-  } else {
-    myProfile.servers.forEach((server, index) => {
-      const waktuSekarang = new Date();
-      const waktuHabis = parseFlexibleDate(server.expired_date);
-      const selisihMilidetik = waktuHabis - waktuSekarang;
-
-      let statusExpired = "";
-      let peringatan = "";
-
-      if (!isNaN(waktuHabis.getTime())) {
-        if (selisihMilidetik > 0) {
-          const hari = Math.floor(selisihMilidetik / (1000 * 60 * 60 * 24));
-          const jam = Math.floor((selisihMilidetik % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-          const menit = Math.floor((selisihMilidetik % (1000 * 60 * 60)) / (1000 * 60));
-
-          if (hari > 0) {
-            statusExpired = `${hari} Hari ${jam} Jam`;
-          } else if (jam > 0) {
-            statusExpired = `${jam} Jam ${menit} Menit`;
-          } else {
-            statusExpired = `${menit} Menit lagi`;
-          }
-
-          if (hari < 2) {
-            peringatan = `\n⚠️ <b>MASA AKTIF AKAN HABIS</b>`;
-          }
-        } else {
-          statusExpired = "❌ <b>SUDAH EXPIRED</b>";
-        }
-      } else {
-        statusExpired = "Format Tanggal Salah";
-      }
-
-      textProfil += `\n🖥 <b>Panel ${index + 1}</b> (<code>${server.username_panel}</code>)\n`;
-      textProfil += `├ Paket: ${server.paket}\n`;
-      textProfil += `├ Order: <code>${server.order_date}</code>\n`;
-      textProfil += `└ Expired: <b>${statusExpired}</b>${peringatan}\n`;
-    });
-
-    btnProfil.unshift([
-      { text: "🔄 Perpanjangan Server", callback_data: "extend_list" }
-    ]);
+  if (daftarServer.length) {
+    btnProfil.unshift([{ text: "🔄 Perpanjang Server", callback_data: "extend_list", style: "success" }]);
   }
 
   textProfil += `</blockquote>`;
@@ -3766,59 +4238,47 @@ case "p_dur_168": {
     parse_mode: "HTML",
     reply_markup: { inline_keyboard: btnProfil }
   }).catch(() => {
-    bot.sendMessage(chatId, textProfil, { parse_mode: "HTML", reply_markup: { inline_keyboard: btnProfil } });
+    return bot.sendMessage(chatId, textProfil, { parse_mode: "HTML", reply_markup: { inline_keyboard: btnProfil } });
   });
+  // Bagian Server Aktif: tabel rich message (panel, VPS NAT, VPS dedicated)
+  if (daftarServer.length) await kirimTabelServer(chatId, daftarServer).catch(e => console.log("Tabel server gagal:", e.message));
   break;
 }
 case "roll_gacha": {
     const dbUsers = getUsers();
     const myProfile = dbUsers[chatId];
 
-    if (myProfile.gachaCount >= 3) {
+    // Spin hanya boleh setelah menjawab soal dengan benar (session gacha_ready)
+    if (!myProfile || userSessions[chatId]?.step !== "gacha_ready") {
+        return bot.answerCallbackQuery(query.id, { text: "Jawab soal Gacha Harian dulu ya (Profil → Gacha Harian).", show_alert: true });
+    }
+    if ((myProfile.gachaCount || 0) >= 3) {
+        delete userSessions[chatId];
         return bot.editMessageText("❌ Kamu sudah melakukannya hari ini, Silakan datang kembali besok!.", { chat_id: chatId, message_id: messageId });
     }
 
-    myProfile.gachaCount += 1;
+    myProfile.gachaCount = (myProfile.gachaCount || 0) + 1;
     const gachaKe = myProfile.gachaCount;
 
     // simpan dulu sebelum ada await, supaya klik cepat berkali-kali tidak lolos batas 3x
     saveUsers(dbUsers);
-    
-    // Sistem Win Rate Rendah (Misal 5% peluang menang)
-    // Berdasarkan permintaan: menang sulit (rate rendah)
-    const winRate = Math.random() < 0.5; // 0.05 = 5% peluang menang
+    await bot.answerCallbackQuery(query.id).catch(() => {});
+
+    const winRate = Math.random() < 0.5;
     let textResult = "";
-    
-    bot.sendMessage(settings.adminId, `🎰 <b>GACHA LOG</b>\nUser: ${chatId}\nUsername: ${myProfile.username}\nKlik Gacha ke-${gachaKe}`);
+
+    bot.sendMessage(settings.adminId, `🎰 <b>GACHA LOG</b>\nUser: ${chatId}\nUsername: ${myProfile.username}\nKlik Gacha ke-${gachaKe}`, { parse_mode: "HTML" }).catch(() => {});
 
     if (winRate) {
-        const hadiah = 5;
-
-        // Kreditkan langsung ke saldo website lewat worker
-        let kreditWeb = false;
-        try {
-            const res = await refundSaldoReal(chatId, hadiah, "hadiah gacha bot");
-            kreditWeb = !!(res && res.status === true);
-            if (!kreditWeb) console.log("Gacha kredit web gagal:", res && res.msg);
-        } catch (e) {
-            console.log("Gacha kredit web error:", e.message);
-        }
-
-        if (kreditWeb) {
-            textResult = `🎉 <b>SELAMAT!</b>\n\nKamu mendapatkan saldo gratis sebesar <b>Rp ${hadiah}</b>! Saldo telah ditambahkan ke profilmu.`;
-
-            // Notif Admin
-            bot.sendMessage(settings.adminId, `🔥 <b>GACHA WINNER!</b>\nUser: ${chatId}\nMendapatkan: Rp ${hadiah}`);
+        const hadiah = Number(settings.gachaHadiah) || 5;
+        // Kredit ke saldo website, sama seperti deposit
+        const kredit = await kreditSaldoWebsite(chatId, hadiah, `Hadiah gacha harian ke-${gachaKe}`);
+        if (kredit.status) {
+            textResult = `🎉 <b>SELAMAT!</b>\n\nKamu mendapatkan saldo <b>Rp ${hadiah.toLocaleString("id-ID")}</b>!\n✅ Sudah masuk ke saldo website.\n💳 Saldo sekarang: <b>Rp ${kredit.new_balance.toLocaleString("id-ID")}</b>`;
+            bot.sendMessage(settings.adminId, `🔥 <b>GACHA WINNER!</b>\nUser: ${chatId}\nMendapatkan: Rp ${hadiah} (masuk saldo website)`, { parse_mode: "HTML" }).catch(() => {});
         } else {
-            // Akun web belum link / worker error: hadiah masuk saldo bot agar user tidak rugi
-            const fresh = getUsers();
-            if (fresh[chatId]) {
-                fresh[chatId].saldo = (fresh[chatId].saldo || 0) + hadiah;
-                saveUsers(fresh);
-            }
-            textResult = `🎉 <b>SELAMAT!</b>\n\nKamu mendapatkan saldo gratis sebesar <b>Rp ${hadiah}</b>! Akun website belum terhubung, jadi hadiah masuk ke saldo bot.`;
-
-            bot.sendMessage(settings.adminId, `⚠️ <b>GACHA WINNER (kredit web gagal)</b>\nUser: ${chatId}\nHadiah: Rp ${hadiah} masuk ke saldo bot`);
+            textResult = `🎉 <b>SELAMAT!</b>\n\nKamu mendapatkan saldo <b>Rp ${hadiah.toLocaleString("id-ID")}</b>!\n⏳ Saldo website sedang tidak bisa dihubungi, hadiah akan dikreditkan admin.` +
+                `\n<i>Pastikan akun website sudah terhubung (menu /start → Hubungkan Akun).</i>`;
         }
     } else {
         textResult = `🎰 <b>ZONK!</b>\n\nMaaf, kamu belum beruntung di putaran ke-${gachaKe}. Ayo coba lagi!`;
@@ -3828,7 +4288,9 @@ case "roll_gacha": {
     let btnGacha = [];
     
     if (sisa > 0) {
-        btnGacha.push([{ text: `🎰 SPIN LAGI (${sisa}x)`, callback_data: "roll_gacha" }]);
+        btnGacha.push([{ text: `🎰 SPIN LAGI (${sisa}x)`, callback_data: "roll_gacha", style: "success" }]);
+    } else {
+        delete userSessions[chatId];
     }
     btnGacha.push([{ text: "« Kembali ke Profil", callback_data: "menu_profil" }]);
 
@@ -3865,10 +4327,15 @@ case "pay_via_saldo": {
     // 1. POTONG SALDO REAL DARI WEBSITE
     const potong = await potongSaldoReal(userId, harga, `Order ${namaLayanan}`);
 
-    if (!potong.status) {
-        return bot.answerCallbackQuery(query.id, { 
-            text: `❌ ${potong.msg}\nHarga: Rp ${harga.toLocaleString()}\nTop Up di boosteryuk.com`, 
-            show_alert: true 
+    if (!potong || !potong.status) {
+        // Callback sudah dijawab ("Sebentar ya..."), jadi jawaban kedua tidak akan tampil -> kirim pesan.
+        // Sesi tetap disimpan supaya user bisa langsung bayar QRIS tanpa order ulang.
+        return bot.sendMessage(chatId, `<blockquote>❌ <b>Pembayaran saldo gagal</b>\n${(potong && (potong.msg || potong.message)) || "Saldo tidak cukup"}\n\n💰 Harga: Rp ${harga.toLocaleString("id-ID")}\n\nBayar langsung pakai QRIS, atau top up saldo dulu.</blockquote>`, {
+            parse_mode: "HTML",
+            reply_markup: { inline_keyboard: [
+                [{ text: "⚡ Bayar QRIS 1 (Fast)", callback_data: "pay_qris_tripay", style: "success" }],
+                [{ text: "➕ Top Up Saldo", callback_data: "menu_deposit", style: "success" }, { text: "« Batalkan", callback_data: "back_to_main" }]
+            ] }
         });
     }
 
@@ -3973,14 +4440,14 @@ case "menu_gacha": {
                 let extButtons = [];
                 myData.servers.forEach((srv, index) => {
                     // Tombol untuk masing-masing server
-                    extButtons.push([{ text: `🖥 Perpanjang: ${srv.username_panel}`, callback_data: `ext_ui_${index}_1` }]);
+                    extButtons.push([{ text: `🖥 ${serverJenis(srv)}: ${srv.username_panel} • ${serverSisa(serverExpiredMs(srv))}`, callback_data: `ext_ui_${index}_30`, style: "success" }]);
                 });
                 extButtons.push([{ text: "« 𝘒𝘦𝘮𝘣𝘢𝘭𝘪 𝘒𝘦 𝘗𝘳𝘰𝘧𝘪𝘭", callback_data: "menu_profil" }]);
 
                 await bot.deleteMessage(chatId, messageId).catch(()=>{});
                 // Menggunakan gambar panel dari setting
                 await bot.sendPhoto(chatId, settings.panelImage, { 
-                    caption: "<blockquote>🔄 <b>PERPANJANG MASA SEWA</b>\n\nSilakan pilih server panel mana yang ingin Anda perpanjang masa aktifnya:</blockquote>", 
+                    caption: "<blockquote>🔄 <b>PERPANJANG MASA SEWA</b>\n\nSilakan pilih server (Panel / VPS NAT / VPS Dedicated) yang ingin diperpanjang:</blockquote>", 
                     parse_mode: "HTML", 
                     reply_markup: { inline_keyboard: extButtons } 
                 });
@@ -5170,11 +5637,16 @@ function isWeekend() {
 }
 bot.on('message', async (msg) => {
   const text = (msg.text || "").trim();
-  if (!text || text.startsWith("/")) return;
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) return;
+  // Dulu handler ini berhenti untuk semua teks yang bukan email, sehingga pencarian SMM,
+  // password tugas, withdraw wallet/QRIS, dan /cancel di bawah tidak pernah jalan.
+  if (!text && !msg.photo) return;
+  if (text.startsWith("/") && text !== "/cancel") return;
   const userId = msg.from.id;
   const chatId = msg.chat.id;
+  const lagiTugas = userState[userId] && ["waiting_email", "waiting_password"].includes(userState[userId].step);
 
+  // HUBUNGKAN AKUN WEBSITE: hanya kalau teksnya email & user tidak sedang submit tugas freelance
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text) && !lagiTugas) {
 
 const res = await fetch(`https://boosteryuk.boosteryukid.workers.dev/api/telegram/link`, {
     method: "POST",
@@ -5198,6 +5670,8 @@ const res = await fetch(`https://boosteryuk.boosteryukid.workers.dev/api/telegra
     } else {
       bot.sendMessage(chatId, `❌ ${apiMsg}`);
     }
+  }
+  return;
   }
   // 1. HANDLE SUBMIT TUGAS - paling atas biar tidak ke skip
 // HANDLE SUBMIT TUGAS STEP 1: EMAIL
@@ -5368,71 +5842,10 @@ if (userState[userId] && userState[userId].step === 'waiting_password') {
 
   const msgLoading = await bot.sendMessage(chatId, '🔍 Mencari kategori...');
 
-  // 3. FIX: Case insensitive + fuzzy
-  const searchText = text.toLowerCase();
-  let filtered = globalServices.filter(s =>
-    s.category.toLowerCase().includes(searchText)
-  );
-
-  // 4. Kalo ga ketemu, kasih saran + balikin mode
-  if (filtered.length === 0) {
-    await bot.deleteMessage(chatId, msgLoading.message_id);
-
-    const allKat = [...new Set(globalServices.map(s => s.category))];
-    const saran = allKat.filter(k =>
-      k.toLowerCase().includes(searchText.slice(0,3))
-    ).slice(0,5);
-
-    const saranText = saran.length > 0
-     ? `\n\nMungkin maksud anda:\n${saran.map(k => `▫️ ${k}`).join('\n')}`
-      : '';
-
-    smmMode.add(chatId); // balikin mode biar user bisa ketik ulang
-
-    return bot.sendMessage(chatId, `❌ Kategori "${text}" Tidak tersedia ${saranText}\n\nKetik ulang atau /cancel`, {
-      parse_mode: 'HTML'
-    });
-  }
-
-  // 5. Extract tipe dinamis
-  const typeMap = {};
-  filtered.forEach(s => {
-    let type = 'Lainnya';
-    const nameLower = s.name.toLowerCase();
-    if (searchText.includes('youtube')) {
-      if (nameLower.includes('subscriber')) type = 'Subscribers';
-      else if (nameLower.includes('view')) type = 'Views';
-      else if (nameLower.includes('like')) type = 'Likes';
-      else if (nameLower.includes('watchtime')) type = 'Watchtime';
-      else if (nameLower.includes('comment')) type = 'Comments';
-    }
-    else if (searchText.includes('instagram') || searchText.includes('tiktok')) {
-      if (nameLower.includes('followers')) type = 'Followers';
-      else if (nameLower.includes('like')) type = 'Likes';
-      else if (nameLower.includes('view')) type = 'Views';
-      else if (nameLower.includes('comment')) type = 'Comments';
-    }
-    else type = s.type.toUpperCase();
-
-    if (!typeMap[type]) typeMap[type] = [];
-    typeMap[type].push(s);
-  });
-
-  const types = Object.keys(typeMap).sort();
-  await bot.deleteMessage(chatId, msgLoading.message_id);
-
-  const caption = `<i>Kategori: ${text}</i>\nTersedia ${filtered.length} layanan\n\n<blockquote>Pilih tipe layanan dibawah ini:</blockquote>`;
-let btn = types.map(t => [{ 
-  text: `🛍 ${t}`, 
-  callback_data: `t|${encodeURIComponent(text)}|${encodeURIComponent(t)}|1` // ganti smm_type_ jadi t|
-}]);
-btn.push([{ text: '⬅️ Ganti Kategori', callback_data: 'kat' }]); // smm_pilih_kategori → kat
-
-bot.sendPhoto(chatId, settings.pp, {
-  caption: caption,
-  parse_mode: 'HTML',
-  reply_markup: { inline_keyboard: btn }
-});
+  // 3. Tampilkan kategori (field "category" dari Fayupedia) yang cocok dengan ketikan
+  await bot.deleteMessage(chatId, msgLoading.message_id).catch(() => {});
+  const adaHasil = await smmKirimKategori(chatId, text);
+  if (!adaHasil) smmMode.add(chatId); // balikin mode biar user bisa ketik ulang
 //pembatas
  
   // 4. HANDLE PET MAKAN - baru diproses jika bukan tugas/withdraw
@@ -5777,6 +6190,9 @@ bot.on('voice', async (msg) => {
             const store = getStore();
             paket = `VPS RAM ${store.vps_ram}`; harga = store.vps_price; type = "vps";
         }
+        // Order lewat voice/teks ikut terkunci kalau menunya ditutup admin
+        const menuOrderTutup = paket && bacaMenuTutup()[type === "vps" ? "vps" : "panel"];
+        if (menuOrderTutup) return kirimInfoMenuTutup(chatId, type === "vps" ? "vps" : "panel");
 
         if (text.includes("saldo")) {
             method = "pay_via_saldo"; methodLabel = "Saldo Akun";
@@ -5990,9 +6406,7 @@ if (nominal > 100000) { // Contoh maksimal 100k
     return bot.sendMessage(chatId, "❌ Maksimal deposit adalah Rp 100.000 dalam satu transaksi.");
 }
 
-    // Hitung Fee Admin agar sinkron dengan sistem QRIS (Jika kamu pakai fee di deposit)
-    const estimasiFee = Math.ceil(nominal * 0.007); 
-    const totalBayarQRIS = nominal + estimasiFee;
+    // Fee TIDAK dihitung bot. Tagihan QRIS = nominal, fee ditambahkan gateway (Tripay) sendiri.
 
     // SIMPAN DATA LENGKAP (Identik dengan format Panel/VPS)
     userSessions[chatId] = { 
@@ -6000,7 +6414,6 @@ if (nominal > 100000) { // Contoh maksimal 100k
         paket: `Deposit Saldo Rp ${nominal.toLocaleString()}`,
         amount: nominal,      // Nominal bersih yang jadi saldo
         harga: nominal,       // Harga dasar untuk Crypto
-        totalQRIS: totalBayarQRIS, // Harga + Fee untuk QRIS
         orderId: `DEP${Date.now()}${chatId}`, // ID Unik
         step: "waiting_payment" 
     };
@@ -6020,7 +6433,7 @@ if (nominal > 100000) { // Contoh maksimal 100k
 
     const textKonfirmasi = `<blockquote>💳 <b>KONFIRMASI DEPOSIT</b>\n\n` +
                          `💰 Nominal: <b>Rp ${nominal.toLocaleString()}</b>\n` +
-                         `💳 Total + Fee: <b>Rp ${totalBayarQRIS.toLocaleString()}</b>\n` +
+                         `💳 Fee: <i>dihitung otomatis oleh gateway saat QRIS dibuat</i>\n` +
                          `🆔 Order ID: <code>${userSessions[chatId].orderId}</code>\n\n` +
                          `<i>Silakan pilih metode pembayaran di bawah ini:</i></blockquote>`;
 
@@ -6057,9 +6470,7 @@ if (nominal > 100000) { // Contoh maksimal 100k
     // ==========================================
 if (userSessions[chatId] && userSessions[chatId].step === "awaiting_username") {
     
-    // 1. Ambil data saldo dan harga dari sesi
-    const dbUsers = getUsers();
-    const mySaldo = await getSaldoReal(chatId);
+    // 1. Ambil harga dari sesi (saldo tidak dicek di sini; dicek saat user memilih Bayar Pakai Saldo)
     const hargaPanel = userSessions[chatId].harga || 0;
 
     userSessions[chatId].username = text;
@@ -6074,7 +6485,7 @@ if (userSessions[chatId] && userSessions[chatId].step === "awaiting_username") {
         reply_markup: {
             inline_keyboard: [
                 // Baris 1: Tombol Bayar Pakai Saldo (Fitur Baru)
-                [{ text: `💳 Bayar Pakai Saldo (Sisa: Rp ${mySaldo.toLocaleString()})`, callback_data: "pay_via_saldo", style: "success" }],
+                [{ text: "💳 Bayar Pakai Saldo", callback_data: "pay_via_saldo", style: "success" }],
                 
                 // Baris 2: Metode Pembayaran Luar (QRIS & Crypto)
                 [
@@ -6091,8 +6502,7 @@ if (userSessions[chatId] && userSessions[chatId].step === "awaiting_username") {
 
     // Gunakan teks asli kamu, tapi tambahkan info rincian Harga & Saldo
     const textFix = `<blockquote>✅ <b>Username Tersimpan:</b> <code>${text}</code>\n\n` +
-                    `💰 <b>Harga Paket:</b> Rp ${hargaPanel.toLocaleString('id-ID')}\n` +
-                    `💳 <b>Saldo Anda:</b> Rp ${mySaldo.toLocaleString('id-ID')}\n\n` +
+                    `💰 <b>Harga Paket:</b> Rp ${hargaPanel.toLocaleString('id-ID')}\n\n` +
                     `Silakan pilih Metode Pembayaran untuk Panel:</blockquote>`;
 
     await bot.sendMessage(chatId, textFix, { parse_mode: "HTML", ...btnPayment });
@@ -6109,9 +6519,6 @@ if (userSessions[chatId] && userSessions[chatId].step === "awaiting_username") {
     // FIX 1: Jangan block /link, /start dll
     if (msg.text && msg.text.startsWith('/')) return;
 
-    // 1. Ambil data Saldo User dari Database
-    const dbUsers = getUsers();
-    const mySaldo = await getSaldoReal(chatId);
     const hargaVps = userSessions[chatId].harga;
 
     // Bersihkan inputan - FIX 2: pakai msg.text bukan text
@@ -6145,7 +6552,7 @@ if (userSessions[chatId] && userSessions[chatId].step === "awaiting_username") {
         reply_markup: {
             inline_keyboard: [
                 // Baris 1: Bayar Pakai Saldo (Paling Cepat)
-                [{ text: `💳 Bayar Pakai Saldo (Sisa: Rp ${mySaldo.toLocaleString()})`, callback_data: "pay_via_saldo", style: "success" }],
+                [{ text: "💳 Bayar Pakai Saldo", callback_data: "pay_via_saldo", style: "success" }],
                 
                 // Baris 2: Metode Pembayaran Luar
                 [
@@ -6163,9 +6570,7 @@ if (userSessions[chatId] && userSessions[chatId].step === "awaiting_username") {
     const textFinal = `<blockquote>✅ <b>HOSTNAME TERSIMPAN</b>\n\n` +
                     `🌐 Hostname: <code>${cleanText}</code>\n` +
                     `📦 Produk: <b>${userSessions[chatId].paket}</b>\n` +
-                    `💰 Harga: <b>Rp ${hargaVps.toLocaleString('id-ID')}</b>\n` +
-                    `━━━━━━━━━━━━━━━━━━\n` +
-                    `💳 Saldo Anda: <b>Rp ${mySaldo.toLocaleString('id-ID')}</b>\n\n` +
+                    `💰 Harga: <b>Rp ${hargaVps.toLocaleString('id-ID')}</b>\n\n` +
                     `<i>Silakan pilih metode pembayaran di bawah ini:</i></blockquote>`;
 
     await bot.sendMessage(chatId, textFinal, { parse_mode: "HTML", ...btnPayment });
@@ -6180,8 +6585,6 @@ if (userSessions[chatId] && userSessions[chatId].step === "awaiting_vps_password
         return bot.sendMessage(chatId, "❌ Password minimal 8 karakter, ketik ulang:");
     }
 
-    const dbUsers = getUsers();
-    const mySaldo = await getSaldoReal(chatId);
     const hargaVps = userSessions[chatId].harga;
 
     userSessions[chatId].password = customPassword;
@@ -6193,7 +6596,7 @@ if (userSessions[chatId] && userSessions[chatId].step === "awaiting_vps_password
     const btnPayment = {
         reply_markup: {
             inline_keyboard: [
-                [{ text: `💳 Bayar Pakai Saldo (Sisa: Rp ${mySaldo.toLocaleString()})`, callback_data: "pay_via_saldo", style: "success" }, 
+                [{ text: "💳 Bayar Pakai Saldo", callback_data: "pay_via_saldo", style: "success" }, 
                    { text: "⚡ QRIS Server 1 (Fast)", callback_data: "pay_qris_tripay", style: "success" }
                 ],
                 [{ text: "« 𝘉𝘢𝘵𝘢𝘭𝘬𝘢𝘯 𝘖𝘳𝘥𝘦𝘳", callback_data: "back_to_main" }]
@@ -6204,9 +6607,7 @@ if (userSessions[chatId] && userSessions[chatId].step === "awaiting_vps_password
     const textFinal = `<blockquote>✅ <b>HOSTNAME TERSIMPAN</b>\n\n` +
                     `🌐 Hostname: <code>${userSessions[chatId].hostname}</code>\n` +
                     `📦 Produk: <b>${userSessions[chatId].paket}</b>\n` +
-                    `💰 Harga: <b>Rp ${hargaVps.toLocaleString('id-ID')}</b>\n` +
-                    `━━━━━━━━━━━━━━━━━━\n` +
-                    `💳 Saldo Anda: <b>Rp ${mySaldo.toLocaleString('id-ID')}</b>\n\n` +
+                    `💰 Harga: <b>Rp ${hargaVps.toLocaleString('id-ID')}</b>\n\n` +
                     `<i>Silakan pilih metode pembayaran di bawah ini:</i></blockquote>`;
 
     await bot.sendMessage(chatId, textFinal, { parse_mode: "HTML", ...btnPayment });
@@ -6333,6 +6734,8 @@ function otpCfg() {
         markupPersen: c.markupPersen ?? 20,            // keuntungan %
         markupMin: c.markupMin ?? 1000,                // keuntungan minimal Rp
         maxNegara: c.maxNegara || 10,                  // jumlah negara termurah yang ditampilkan
+        maxTingkat: c.maxTingkat || 20,                // jumlah pilihan harga per negara yang ditampilkan
+        restUrl: c.restUrl,
         negaraUtama: c.negaraUtama ?? 6,               // 6 = Indonesia, selalu di paling atas
         intervalCek: c.intervalCek || 5000,
         layanan: Array.isArray(c.layanan) && c.layanan.length ? c.layanan : OTP_LAYANAN_DEFAULT
@@ -6348,6 +6751,25 @@ async function heroApi(action, params = {}) {
     try { return JSON.parse(txt); } catch { return txt; }
 }
 
+// REST v1 (header Authorization: ApiKey ...). Dipakai untuk /activations/offers (peta harga -> stok).
+async function heroRest(pathUrl, params = {}) {
+    const cfg = otpCfg();
+    if (!cfg.apiKey) throw new Error("API key HeroSMS belum diatur");
+    const base = (cfg.restUrl || "https://hero-sms.com/api/v1").replace(/\/$/, "");
+    const qs = new URLSearchParams(params).toString();
+    const r = await fetch(`${base}${pathUrl}${qs ? "?" + qs : ""}`, {
+        headers: { Authorization: `ApiKey ${cfg.apiKey}`, Accept: "application/json" },
+        signal: AbortSignal.timeout(20000)
+    });
+    const txt = (await r.text()).trim();
+    let data; try { data = JSON.parse(txt); } catch { data = txt; }
+    if (!r.ok) {
+        const kode = (data && data.title) || (r.status === 401 ? "BAD_KEY" : `HTTP_${r.status}`);
+        throw new Error(kode);
+    }
+    return data;
+}
+
 // Kode error HeroSMS: teks ("NO_NUMBERS", "BAD_KEY") atau JSON { title, details, info }
 function heroErr(res) {
     if (res && typeof res === "object" && !Array.isArray(res) && res.title) return res.title;
@@ -6356,15 +6778,33 @@ function heroErr(res) {
 }
 
 const OTP_ERR_TEKS = {
-    NO_NUMBERS: "Nomor untuk layanan & negara ini sedang habis. Coba negara lain.",
+    NO_NUMBERS: "Nomor di harga ini sedang habis.",
     NO_BALANCE: "Stok server OTP sedang kosong. Admin sudah diberi tahu, coba lagi nanti.",
     BAD_KEY: "Konfigurasi server OTP bermasalah. Admin sudah diberi tahu.",
     NO_KEY: "Konfigurasi server OTP bermasalah. Admin sudah diberi tahu.",
-    WRONG_MAX_PRICE: "Harga baru saja naik. Silakan pilih negara lagi untuk melihat harga terbaru.",
+    WRONG_MAX_PRICE: "Harga di tingkat ini baru saja berubah.",
     CHANNELS_LIMIT: "Server OTP sedang penuh. Coba lagi beberapa menit lagi.",
     BAD_SERVICE: "Layanan tidak valid.",
     BANNED: "Server OTP sedang dibatasi. Coba lagi nanti."
 };
+
+// Error konfigurasi (key salah, saldo HeroSMS habis) dilaporkan ke admin, maks 1x per 10 menit per kode
+const otpLaporTerakhir = {};
+function otpLaporAdmin(kode, detail) {
+    if (!["BAD_KEY", "NO_KEY", "NO_BALANCE", "CHANNELS_LIMIT", "BANNED"].includes(kode)) return;
+    if (Date.now() - (otpLaporTerakhir[kode] || 0) < 10 * 60 * 1000) return;
+    otpLaporTerakhir[kode] = Date.now();
+    const saran = kode === "BAD_KEY" || kode === "NO_KEY"
+        ? "Cek settings.herosms.apiKey (salah salin / ada spasi / key sudah di-reset di hero-sms.com)."
+        : "Cek saldo & akun di hero-sms.com.";
+    bot.sendMessage(settings.adminId, `<blockquote>⚠️ <b>HEROSMS ERROR</b>: <code>${kode}</code>\n${String(detail || "").replace(/[<>&]/g, "")}\n\n${saran}</blockquote>`, { parse_mode: "HTML" }).catch(() => {});
+}
+
+const OTP_HABIS_DI_HARGA = ["NO_NUMBERS", "WRONG_MAX_PRICE"];
+function otpTawarkanHargaLain(chatId, service, country, cost) {
+    return otpTampilHarga(chatId, null, service, country, { kecuali: cost, pesan: `⚠️ Nomor di harga ${otpRp(otpHarga(cost))} sedang tidak tersedia. Pilih harga lain:` })
+        .catch(e => console.log("[OTP] gagal tampil harga lain:", e.message));
+}
 
 function otpHarga(cost) {
     const cfg = otpCfg();
@@ -6431,30 +6871,22 @@ function otpSimpan() {
     } catch (e) { console.log("[OTP] gagal simpan:", e.message); }
 }
 
+// OTP dicek otomatis di latar belakang (otpMulaiPantau), jadi tidak ada tombol "Cek SMS".
 function otpKeyboard(o) {
+    if (o.codes.length && o.status === "WAIT") { // menunggu SMS berikutnya setelah "Minta SMS Lagi"
+        return { inline_keyboard: [[{ text: "✅ Selesai", callback_data: `otp_f_${o.id}`, style: "success" }]] };
+    }
     if (o.codes.length) {
         return { inline_keyboard: [
             [{ text: "🔁 Minta SMS Lagi", callback_data: `otp_r_${o.id}` }, { text: "✅ Selesai", callback_data: `otp_f_${o.id}`, style: "success" }]
         ] };
     }
-    return { inline_keyboard: [
-        [{ text: "🔄 Cek SMS", callback_data: `otp_k_${o.id}`, style: "success" }, { text: "❌ Batalkan", callback_data: `otp_x_${o.id}`, style: "danger" }]
-    ] };
+    return { inline_keyboard: [[{ text: "❌ Batalkan", callback_data: `otp_x_${o.id}`, style: "danger" }]] };
 }
 
-function otpTeksOrder(o) {
-    const kode = o.codes.length
-        ? `\n\n🔑 <b>Kode OTP:</b> <code>${o.codes[o.codes.length - 1]}</code>` + (o.codes.length > 1 ? `\n<i>Kode sebelumnya: ${o.codes.slice(0, -1).join(", ")}</i>` : "")
-        : `\n\n⏳ <i>Menunggu SMS masuk... (cek otomatis tiap ${Math.round(otpCfg().intervalCek / 1000)} detik)</i>`;
-    const batas = new Date(o.endTime).toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit" });
-    return `<blockquote>📱 <b>NOMOR OTP</b>\n━━━━━━━━━━━━━━━━━━\n` +
-        `🧩 Layanan: <b>${o.serviceName}</b>\n🌍 Negara: ${o.countryName}\n` +
-        `📞 Nomor: <code>+${o.phone}</code>\n💵 Harga: ${otpRp(o.harga)}\n🆔 ID: <code>${o.id}</code>\n⌛ Berlaku s/d: ${batas} WIB` +
-        kode + `</blockquote>`;
-}
 
 async function otpUpdatePesan(o) {
-    await bot.editMessageText(otpTeksOrder(o), { chat_id: o.chatId, message_id: o.messageId, parse_mode: "HTML", reply_markup: otpKeyboard(o) }).catch(() => {});
+    await otpGantiPesanOrder(o, "1");
 }
 
 // Kembalikan saldo sekali saja per order
@@ -6478,7 +6910,7 @@ function otpSelesai(o, status) {
     otpSimpan();
 }
 
-// Satu putaran cek status. Dipakai timer & tombol "Cek SMS".
+// Satu putaran cek status, dipanggil otomatis oleh timer (otpMulaiPantau). Handler otp_k_ hanya untuk pesan lama.
 async function otpCekStatus(o) {
     if (o.busy || !otpOrders.has(o.id)) return;
     o.busy = true;
@@ -6490,7 +6922,7 @@ async function otpCekStatus(o) {
             } else {
                 await heroApi("setStatus", { id: o.id, status: 8 }).catch(() => {});
                 otpSelesai(o, "EXPIRED");
-                await bot.editMessageText(otpTeksOrder(o) + "\n⌛ <b>Waktu habis, SMS tidak masuk.</b>", { chat_id: o.chatId, message_id: o.messageId, parse_mode: "HTML" }).catch(() => {});
+                await otpGantiPesanOrder(o, "1", { akhir: "⌛ <b>Waktu habis, SMS tidak masuk.</b>", markup: otpTombolPesanLagi(`otp_n_${o.service}_${o.country}`) });
                 await otpRefund(o, "SMS tidak masuk");
             }
             return;
@@ -6507,12 +6939,14 @@ async function otpCekStatus(o) {
                 clearInterval(o.timer); // berhenti sampai user minta SMS lagi
                 otpSimpan();
                 await otpUpdatePesan(o);
-                bot.sendMessage(o.chatId, `🔑 Kode OTP ${o.serviceName}: <code>${kode}</code>`, { parse_mode: "HTML" }).catch(() => {});
+                bot.sendMessage(o.chatId, `🔑 Kode OTP ${o.serviceName}: <code>${kode}</code>`, { parse_mode: "HTML", reply_markup: { inline_keyboard: [[{ text: "📋 Salin Kode OTP", copy_text: { text: String(kode) } }]] } }).catch(() => {});
+                await otpKirimSukses(o, "1");
+                otpSimpan();
             }
         } else if (res === "STATUS_CANCEL") {
             otpSelesai(o, "CANCEL");
             if (!o.codes.length) {
-                await bot.editMessageText(otpTeksOrder(o) + "\n❌ <b>Aktivasi dibatalkan.</b>", { chat_id: o.chatId, message_id: o.messageId, parse_mode: "HTML" }).catch(() => {});
+                await otpGantiPesanOrder(o, "1", { akhir: "❌ <b>Aktivasi dibatalkan.</b>", markup: otpTombolPesanLagi(`otp_n_${o.service}_${o.country}`) });
                 await otpRefund(o, "aktivasi dibatalkan");
             }
         }
@@ -6527,6 +6961,7 @@ async function otpCekStatus(o) {
 function otpMulaiPantau(o) {
     clearInterval(o.timer);
     o.timer = setInterval(() => otpCekStatus(o), otpCfg().intervalCek);
+    setTimeout(() => otpCekStatus(o), 2000); // cek pertama lebih cepat
 }
 
 // Lanjutkan order yang masih jalan setelah bot restart
@@ -6554,132 +6989,241 @@ async function otpTampilMenu(chatId, messageId) {
 
     const teks = `<blockquote>📱 <b>NOMOR OTP / VERIFIKASI</b>\n━━━━━━━━━━━━━━━━━━\n` +
         `Nomor virtual untuk menerima kode verifikasi (WhatsApp, Telegram, dll).\n\n` +
-        `1️⃣ Pilih layanan\n2️⃣ Pilih negara\n3️⃣ Bayar pakai saldo\n4️⃣ Pakai nomor, kode OTP dikirim otomatis\n\n` +
-        `<i>SMS tidak masuk? Batalkan, saldo kembali utuh.</i></blockquote>`;
+        `1️⃣ Pilih layanan\n2️⃣ Ketik nama negara\n3️⃣ Pilih harga (termurah → termahal, stok terlihat)\n4️⃣ Bayar QRIS 1 atau saldo\n5️⃣ Kode OTP dikirim otomatis\n\n` +
+        `<i>SMS tidak masuk? Batalkan, dana kembali ke saldo akun.</i></blockquote>`;
     if (messageId) await bot.deleteMessage(chatId, messageId).catch(() => {});
     return bot.sendMessage(chatId, teks, { parse_mode: "HTML", reply_markup: { inline_keyboard: baris } });
 }
 
-async function otpPilihNegara(chatId, messageId, service) {
-    const cfg = otpCfg();
-    const [harga, negara, nama] = await Promise.all([otpHargaPerNegara(service), otpNegaraMap(), otpNamaLayanan(service)]);
-    if (!harga.length) {
-        return bot.editMessageText(`<blockquote>😔 Stok nomor <b>${nama}</b> sedang kosong di semua negara.</blockquote>`, {
-            chat_id: chatId, message_id: messageId, parse_mode: "HTML",
-            reply_markup: { inline_keyboard: [[{ text: "⬅️ Kembali", callback_data: "menu_otp" }]] }
-        });
-    }
-    harga.sort((a, b) => a.cost - b.cost);
-    const utama = harga.find(h => String(h.country) === String(cfg.negaraUtama));
-    const daftar = [utama, ...harga.filter(h => h !== utama)].filter(Boolean).slice(0, cfg.maxNegara);
+// Nama negara versi Indonesia -> kata kunci bahasa Inggris di getCountries
+const OTP_ALIAS_NEGARA = {
+    amerika: "usa", "amerika serikat": "usa", as: "usa", inggris: "united kingdom", rusia: "russia",
+    filipina: "philippines", brasil: "brazil", belanda: "netherlands", jerman: "germany", prancis: "france",
+    perancis: "france", jepang: "japan", korea: "south korea", "korea selatan": "south korea", tiongkok: "china",
+    cina: "china", arab: "saudi arabia", "arab saudi": "saudi arabia", mesir: "egypt", turki: "turkey",
+    spanyol: "spain", italia: "italy", kamboja: "cambodia", myanmar: "myanmar", "hong kong": "hong kong"
+};
 
-    const baris = daftar.map(h => [{
-        text: `${negara[h.country] || "Negara " + h.country} • ${otpRp(otpHarga(h.cost))} (${h.count})`,
-        callback_data: `otp_c_${service}_${h.country}`
-    }]);
-    baris.push([{ text: "⬅️ Kembali", callback_data: "menu_otp" }]);
-
-    const teks = `<blockquote>🌍 <b>PILIH NEGARA - ${nama}</b>\n━━━━━━━━━━━━━━━━━━\n` +
-        `Menampilkan ${daftar.length} negara termurah (angka dalam kurung = stok).</blockquote>`;
-    return bot.editMessageText(teks, { chat_id: chatId, message_id: messageId, parse_mode: "HTML", reply_markup: { inline_keyboard: baris } })
-        .catch(() => bot.sendMessage(chatId, teks, { parse_mode: "HTML", reply_markup: { inline_keyboard: baris } }));
+function otpCariNegara(peta, ketik) {
+    const k = String(ketik || "").trim().toLowerCase();
+    if (!k) return [];
+    const kunci = OTP_ALIAS_NEGARA[k] || k;
+    const semua = Object.entries(peta).map(([id, nama]) => ({ id, nama }));
+    const persis = semua.filter(n => n.nama.toLowerCase() === kunci);
+    if (persis.length) return persis;
+    return semua.filter(n => n.nama.toLowerCase().includes(kunci)).slice(0, 10);
 }
 
-async function otpKonfirmasi(chatId, messageId, userId, service, country) {
-    const [harga, negara, nama, saldo] = await Promise.all([
-        otpHargaPerNegara(service, country), otpNegaraMap(), otpNamaLayanan(service), getSaldoReal(userId)
+// Pilihan harga 1 negara: [{ cost, harga, stok }] urut termurah -> termahal (semua tingkat yang ada stoknya).
+// Sumber (berurutan):
+//  1. REST GET /activations/offers/sms -> data[service][country].map = { "harga": stok } (resmi, "Price -> quantity")
+//  2. getTopCountriesByService&freePrice=true -> physicalPriceMap (deprecated)
+//  3. getPrices -> 1 harga
+async function otpTingkatHarga(service, country) {
+    const tambah = (arr, c, n) => { if (Number(c) > 0 && Number(n) > 0) arr.push({ cost: Number(c), stok: Number(n) }); };
+    let baris = [];
+    let sumber = "";
+    try {
+        const res = await heroRest("/activations/offers/sms", { services: service, countries: String(country) });
+        const o = res && res.data && res.data[service] && res.data[service][String(country)];
+        if (o) {
+            for (const [c, n] of Object.entries(o.map || {})) tambah(baris, c, n);
+            if (!baris.length) { // peta per operator digabung
+                const gab = {};
+                for (const op of Object.values(o.operators || {})) for (const [c, n] of Object.entries(op.map || {})) gab[c] = (gab[c] || 0) + Number(n);
+                for (const [c, n] of Object.entries(gab)) tambah(baris, c, n);
+            }
+            if (!baris.length && o.prices && o.counts) tambah(baris, o.prices.default, o.counts.defaultPrice || o.counts.total);
+            if (baris.length) sumber = "offers";
+        }
+    } catch (e) {
+        if (["BAD_KEY", "NO_KEY"].includes(e.message)) throw e;
+        console.log("[OTP] offers gagal, pakai cadangan:", e.message);
+    }
+    if (!baris.length) {
+        try {
+            const res = await heroApi("getTopCountriesByService", { service, freePrice: "true" });
+            if (heroErr(res)) throw new Error(heroErr(res));
+            let list = Array.isArray(res) ? res : Object.values(res || {});
+            if (list.length && !("country" in list[0]) && list[0][service]) list = list[0][service];
+            const row = list.find(r => String(r.country) === String(country));
+            if (row) {
+                for (const [c, n] of Object.entries(row.physicalPriceMap || row.priceMap || {})) tambah(baris, c, n);
+                if (!baris.length) tambah(baris, row.price, row.count);
+            }
+            if (baris.length) sumber = "top";
+        } catch (e) {
+            if (["BAD_KEY", "NO_KEY"].includes(e.message)) throw e;
+        }
+    }
+    if (!baris.length) {
+        const p = (await otpHargaPerNegara(service, country)).find(h => String(h.country) === String(country));
+        if (p) { tambah(baris, p.cost, p.count); sumber = "prices"; }
+    }
+    // Gabungkan tingkat yang harga jualnya sama setelah markup & pembulatan.
+    // cost tertinggi dipakai sebagai maxPrice supaya semua stok di harga jual itu bisa terbeli.
+    const perRp = new Map();
+    for (const b of baris) {
+        const harga = otpHarga(b.cost);
+        const ada = perRp.get(harga);
+        if (ada) { ada.stok += b.stok; ada.cost = Math.max(ada.cost, b.cost); }
+        else perRp.set(harga, { cost: b.cost, harga, stok: b.stok, sumber });
+    }
+    return [...perRp.values()].sort((a, b) => a.harga - b.harga).slice(0, otpCfg().maxTingkat);
+}
+
+const otpStok = n => Number(n).toLocaleString("id-ID");
+
+// Kirim rich message (tabel), jatuh ke HTML biasa kalau sendRichMessage ditolak
+async function otpKirimRich(chatId, judul, info, extraHtml, rows, catatan) {
+    const esc = t => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const rich = `<h3>${esc(judul)}</h3>\n<table bordered striped>\n` +
+        info.map(([k, v]) => `  <tr><td><b>${esc(k)}</b></td><td>${v}</td></tr>`).join("\n") +
+        `\n</table>\n${extraHtml || ""}${catatan ? `\n<p><i>${esc(catatan)}</i></p>` : ""}`;
+    try {
+        return await sendRichMessage(chatId, rich, { reply_markup: { inline_keyboard: rows } });
+    } catch (e) {
+        const biasa = `<blockquote><b>${esc(judul)}</b>\n━━━━━━━━━━━━━━━━━━\n` +
+            info.map(([k, v]) => `${esc(k)}: ${v}`).join("\n") + (catatan ? `\n\n<i>${esc(catatan)}</i>` : "") + `</blockquote>`;
+        return bot.sendMessage(chatId, biasa, { parse_mode: "HTML", reply_markup: { inline_keyboard: rows } });
+    }
+}
+
+async function otpMintaNegara(chatId, messageId, service) {
+    const nama = await otpNamaLayanan(service);
+    userSessions[chatId] = { type: "otp", step: "otp_negara", service };
+    if (messageId) await bot.deleteMessage(chatId, messageId).catch(() => {});
+    return bot.sendMessage(chatId, `<blockquote>🌍 <b>${nama}</b>\n\nKetik nama negara nomor yang kamu mau.\nContoh: <code>indonesia</code>, <code>malaysia</code>, <code>amerika</code></blockquote>`, {
+        parse_mode: "HTML", reply_markup: { inline_keyboard: [[{ text: "⬅️ Ganti Layanan", callback_data: "menu_otp" }]] }
+    });
+}
+
+// opsi.kecuali = cost yang baru gagal dibeli (disembunyikan), opsi.pesan = keterangan di atas daftar
+async function otpTampilHarga(chatId, messageId, service, country, opsi = {}) {
+    const [semuaTingkat, negara, nama] = await Promise.all([otpTingkatHarga(service, country), otpNegaraMap(), otpNamaLayanan(service)]);
+    const tingkat = opsi.kecuali ? semuaTingkat.filter(t => Math.abs(t.cost - opsi.kecuali) > 1e-9 && t.harga !== otpHarga(opsi.kecuali)) : semuaTingkat;
+    if (messageId) await bot.deleteMessage(chatId, messageId).catch(() => {});
+    const namaNegara = negara[country] || `Negara ${country}`;
+    if (!tingkat.length) {
+        userSessions[chatId] = { type: "otp", step: "otp_negara", service };
+        return bot.sendMessage(chatId, `<blockquote>😔 Stok <b>${nama}</b> untuk <b>${namaNegara}</b> sedang kosong.\nKetik nama negara lain:</blockquote>`, {
+            parse_mode: "HTML", reply_markup: { inline_keyboard: [[{ text: "⬅️ Ganti Layanan", callback_data: "menu_otp" }]] }
+        });
+    }
+    const totalStok = tingkat.reduce((s, t) => s + t.stok, 0);
+    const tabel = `<table bordered striped compact>\n  <tr><th>Pilihan</th><th>Harga</th><th>Stok</th></tr>\n` +
+        tingkat.map((t, i) => `  <tr><td>${i + 1}</td><td>${otpRp(t.harga)}</td><td>${otpStok(t.stok)}</td></tr>`).join("\n") + `\n</table>`;
+    const rows = tingkat.map((t, i) => [{ text: `${i + 1}. ${otpRp(t.harga)} • stok ${otpStok(t.stok)}`, callback_data: `otp_t_${service}_${country}_${t.cost}` }]);
+    rows.push([{ text: "🌍 Ganti Negara", callback_data: `otp_s_${service}` }, { text: "⬅️ Ganti Layanan", callback_data: "menu_otp" }]);
+    return otpKirimRich(chatId, "💰 PILIH HARGA", [
+        ["Layanan", nama], ["Negara", namaNegara], ["Total Stok", otpStok(totalStok)]
+    ], `${opsi.pesan ? `<p><b>${opsi.pesan}</b></p>\n` : ""}<p>Urut dari termurah. Kalau harga termurah habis, pilih harga berikutnya.</p>\n${tabel}`, rows);
+}
+
+async function otpKonfirmasi(chatId, messageId, userId, service, country, cost) {
+    const [tingkat, negara, nama] = await Promise.all([
+        otpTingkatHarga(service, country), otpNegaraMap(), otpNamaLayanan(service)
     ]);
-    const p = harga.find(h => String(h.country) === String(country));
-    if (!p) {
-        return bot.editMessageText("<blockquote>😔 Stok negara ini baru saja habis. Pilih negara lain.</blockquote>", {
-            chat_id: chatId, message_id: messageId, parse_mode: "HTML",
-            reply_markup: { inline_keyboard: [[{ text: "⬅️ Pilih Negara", callback_data: `otp_s_${service}` }]] }
+    const t = tingkat.find(x => Math.abs(x.cost - cost) < 1e-9) || tingkat.find(x => otpHarga(x.cost) === otpHarga(cost));
+    if (messageId) await bot.deleteMessage(chatId, messageId).catch(() => {});
+    if (!t) {
+        return bot.sendMessage(chatId, "<blockquote>😔 Harga ini baru saja habis. Silakan pilih harga lain.</blockquote>", {
+            parse_mode: "HTML", reply_markup: { inline_keyboard: [[{ text: "⬅️ Pilihan Harga", callback_data: `otp_n_${service}_${country}` }]] }
         });
     }
-    const total = otpHarga(p.cost);
-    const cukup = saldo >= total;
-    const teks = `<blockquote>🧾 <b>KONFIRMASI ORDER OTP</b>\n━━━━━━━━━━━━━━━━━━\n` +
-        `🧩 Layanan: <b>${nama}</b>\n🌍 Negara: ${negara[country] || country}\n📦 Stok: ${p.count}\n` +
-        `💵 Harga: <b>${otpRp(total)}</b>\n💳 Saldo kamu: ${otpRp(saldo)}\n\n` +
-        (cukup ? `Nomor langsung dibuat setelah bayar.` : `⚠️ Saldo kurang ${otpRp(total - saldo)}. Silakan deposit dulu di menu Profil.`) +
-        `</blockquote>`;
-    const baris = [];
-    if (cukup) baris.push([{ text: `💳 Bayar ${otpRp(total)}`, callback_data: `otp_b_${service}_${country}`, style: "success" }]);
-    else baris.push([{ text: "💰 Deposit Saldo", callback_data: "menu_profil", style: "success" }]);
-    baris.push([{ text: "⬅️ Pilih Negara", callback_data: `otp_s_${service}` }]);
-    return bot.editMessageText(teks, { chat_id: chatId, message_id: messageId, parse_mode: "HTML", reply_markup: { inline_keyboard: baris } });
+    const rows = [[{ text: "⚡ Bayar QRIS 1 (Fast)", callback_data: `otp_q_${service}_${country}_${t.cost}`, style: "success" }]];
+    rows.push([{ text: "💳 Bayar Pakai Saldo", callback_data: `otp_b_${service}_${country}_${t.cost}`, style: "primary" }]);
+    rows.push([{ text: "⬅️ Pilihan Harga", callback_data: `otp_n_${service}_${country}` }]);
+    return otpKirimRich(chatId, "🧾 KONFIRMASI ORDER OTP", [
+        ["Layanan", nama], ["Negara", negara[country] || country], ["Stok", otpStok(t.stok)],
+        ["Harga", `<b>${otpRp(t.harga)}</b>`]
+    ], "", rows, "Pilih metode pembayaran. Nomor dibuat otomatis setelah pembayaran berhasil.");
 }
 
-async function otpBeli(query, service, country) {
+// Beli nomor ke HeroSMS & buat order. Dipakai jalur saldo & jalur QRIS 1 (handlePaymentSuccess).
+// Lempar Error(kode) kalau gagal; pemanggil yang mengembalikan dana.
+async function otpAmbilNomor({ userId, chatId, service, country, cost, harga, username }) {
+    const res = await heroApi("getNumberV2", { service, country, maxPrice: cost });
+    const err = heroErr(res);
+    if (err || !res || !res.activationId) {
+        const kode = err || "UNKNOWN";
+        otpLaporAdmin(kode, res && res.details);
+        const e = new Error(kode);
+        e.teksUser = OTP_ERR_TEKS[kode] || `Gagal mengambil nomor (${kode}).`;
+        throw e;
+    }
+    const negara = await otpNegaraMap().catch(() => ({}));
+    const o = {
+        id: String(res.activationId),
+        userId, chatId,
+        phone: String(res.phoneNumber),
+        service, serviceName: await otpNamaLayanan(service),
+        country: String(country), countryName: negara[country] || String(country),
+        harga, cost: Number(res.activationCost) || cost,
+        endTime: Date.parse(res.activationEndTime) || Date.now() + 20 * 60 * 1000,
+        codes: [], status: "WAIT", refunded: false, messageId: null, username: username || "User", incomeLogged: false
+    };
+    o.messageId = await otpKirimPesanOrder(o, "1");
+    otpOrders.set(o.id, o);
+    otpSimpan();
+    otpMulaiPantau(o);
+    // Log income admin baru dikirim setelah OTP diterima (otpKirimSukses)
+    return o;
+}
+
+async function otpBeliSaldo(query, service, country, cost) {
     const userId = query.from.id;
     const chatId = query.message.chat.id;
-    const messageId = query.message.message_id;
     if (otpBeliLock.has(userId)) return bot.answerCallbackQuery(query.id, { text: "⏳ Pesanan sebelumnya masih diproses...", show_alert: true });
     otpBeliLock.add(userId);
+    const harga = otpHarga(cost); // harga jual selalu dihitung dari modal yang dikunci sebagai maxPrice
     let dipotong = 0;
     try {
         await bot.answerCallbackQuery(query.id, { text: "Memproses..." }).catch(() => {});
-        const harga = await otpHargaPerNegara(service, country);
-        const p = harga.find(h => String(h.country) === String(country));
-        if (!p) return bot.sendMessage(chatId, "😔 Stok negara ini baru saja habis. Pilih negara lain.");
-        const total = otpHarga(p.cost);
-
-        const potong = await potongSaldoReal(userId, total, `Order OTP ${service}/${country}`);
+        const potong = await potongSaldoReal(userId, harga, `Order OTP ${service}/${country}`);
         if (!potong || !potong.status) {
-            return bot.sendMessage(chatId, `❌ Pembayaran gagal: ${(potong && (potong.msg || potong.message)) || "saldo tidak cukup"}`);
+            return bot.sendMessage(chatId, `❌ Pembayaran saldo gagal: ${(potong && (potong.msg || potong.message)) || "saldo tidak cukup"}\n💰 Harga: ${otpRp(harga)}\n\nBayar langsung pakai QRIS, atau top up saldo dulu.`, {
+                reply_markup: { inline_keyboard: [
+                    [{ text: "⚡ Bayar QRIS 1 (Fast)", callback_data: `otp_q_${service}_${country}_${cost}`, style: "success" }],
+                    [{ text: "➕ Top Up Saldo", callback_data: "menu_deposit", style: "success" }]
+                ] }
+            });
         }
-        dipotong = total;
-
-        // maxPrice = harga modal yang tadi ditampilkan, supaya tidak ikut kenaikan harga diam-diam
-        const res = await heroApi("getNumberV2", { service, country, maxPrice: p.cost });
-        const err = heroErr(res);
-        if (err || !res || !res.activationId) {
-            const kode = err || "UNKNOWN";
-            if (["NO_BALANCE", "BAD_KEY", "NO_KEY", "CHANNELS_LIMIT"].includes(kode)) {
-                bot.sendMessage(settings.adminId, `<blockquote>⚠️ <b>HEROSMS ERROR</b>: <code>${kode}</code>\n${(res && res.details) || ""}</blockquote>`, { parse_mode: "HTML" }).catch(() => {});
-            }
-            const r = await refundSaldoReal(userId, total, `Refund OTP gagal beli - ${kode}`).catch(e => ({ status: false, msg: e.message }));
-            dipotong = 0;
-            if (!r || !r.status) {
-                bot.sendMessage(settings.adminId, `⚠️ REFUND OTP GAGAL user ${userId} ${otpRp(total)} (${kode})`).catch(() => {});
-            }
-            return bot.sendMessage(chatId, `❌ ${OTP_ERR_TEKS[kode] || "Gagal mengambil nomor (" + kode + ")."}\n${r && r.status ? "Saldo sudah dikembalikan." : "Admin akan mengembalikan saldo manual."}`);
-        }
-
-        const negara = await otpNegaraMap().catch(() => ({}));
-        const o = {
-            id: String(res.activationId),
-            userId, chatId,
-            phone: String(res.phoneNumber),
-            service, serviceName: await otpNamaLayanan(service),
-            country: String(country), countryName: negara[country] || String(country),
-            harga: total, cost: Number(res.activationCost) || p.cost,
-            endTime: Date.parse(res.activationEndTime) || Date.now() + 20 * 60 * 1000,
-            codes: [], status: "WAIT", refunded: false, messageId: null
-        };
+        dipotong = harga;
+        await bot.deleteMessage(chatId, query.message.message_id).catch(() => {});
+        await otpAmbilNomor({ userId, chatId, service, country, cost, harga, username: otpNamaUser(query.from) });
         dipotong = 0; // sudah jadi order; refund selanjutnya lewat otpRefund
-        await bot.deleteMessage(chatId, messageId).catch(() => {});
-        const sent = await bot.sendMessage(chatId, otpTeksOrder(o), { parse_mode: "HTML", reply_markup: otpKeyboard(o) });
-        o.messageId = sent.message_id;
-        otpOrders.set(o.id, o);
-        otpSimpan();
-        otpMulaiPantau(o);
-        bot.sendMessage(settings.adminId, `<blockquote>📱 <b>INCOME: NOMOR OTP</b>\n━━━━━━━━━━━━━━━━━━\n🆔 ID: <code>${userId}</code>\n🧩 ${o.serviceName} / ${o.countryName}\n💵 ${otpRp(total)} (modal $${o.cost})\n🧾 Aktivasi: <code>${o.id}</code></blockquote>`, { parse_mode: "HTML" }).catch(() => {});
     } catch (e) {
         console.log("[OTP] beli gagal:", e.message);
         if (dipotong) {
-            const r = await refundSaldoReal(userId, dipotong, `Refund OTP error - ${e.message}`).catch(() => ({ status: false }));
-            bot.sendMessage(chatId, `⚠️ Terjadi kesalahan. ${r.status ? "Saldo sudah dikembalikan." : "Admin akan mengembalikan saldo manual."}`).catch(() => {});
-            if (!r.status) bot.sendMessage(settings.adminId, `⚠️ REFUND OTP GAGAL user ${userId} ${otpRp(dipotong)}: ${e.message}`).catch(() => {});
+            const r = await refundSaldoReal(userId, dipotong, `Refund OTP gagal beli - ${e.message}`).catch(() => ({ status: false }));
+            if (!r || !r.status) bot.sendMessage(settings.adminId, `⚠️ REFUND OTP GAGAL user ${userId} ${otpRp(dipotong)}: ${e.message}`).catch(() => {});
+            await bot.sendMessage(chatId, `❌ ${e.teksUser || "Terjadi kesalahan."}\n${r && r.status ? "Saldo sudah dikembalikan." : "Admin akan mengembalikan saldo manual."}`).catch(() => {});
+            if (OTP_HABIS_DI_HARGA.includes(e.message)) await otpTawarkanHargaLain(chatId, service, country, cost);
         } else {
-            bot.sendMessage(chatId, "⚠️ Terjadi kesalahan, coba lagi nanti.").catch(() => {});
+            bot.sendMessage(chatId, `⚠️ ${e.teksUser || "Terjadi kesalahan, coba lagi nanti."}`).catch(() => {});
         }
     } finally {
         otpBeliLock.delete(userId);
     }
 }
 
+// QRIS 1: simpan sesi bertipe "otp" lalu lempar ke pay_qris_tripay.
+// Setelah PAID, handlePaymentSuccess memanggil otpAmbilNomor; kalau gagal, selesaikanQrisTripay mengembalikan dana ke saldo.
+async function otpBayarQris(query, service, country, cost) {
+    const userId = query.from.id;
+    const chatId = query.message.chat.id;
+    const harga = otpHarga(cost);
+    const [nama, negara] = await Promise.all([otpNamaLayanan(service), otpNegaraMap().catch(() => ({}))]);
+    userSessions[userId] = {
+        type: "otp", service, country: String(country), cost, harga,
+        paket: `OTP ${nama} - ${negara[country] || country}`, userId, chatId, tgUser: otpNamaUser(query.from)
+    };
+    return bot.emit("callback_query", { ...query, data: "pay_qris_tripay" });
+}
+
 async function otpAksi(query, aksi, id) {
+
     const o = otpOrders.get(id);
     const jawab = (text, alert = true) => bot.answerCallbackQuery(query.id, { text, show_alert: alert }).catch(() => {});
     if (!o) return jawab("Pesanan ini sudah selesai / tidak ditemukan.");
@@ -6694,7 +7238,7 @@ async function otpAksi(query, aksi, id) {
         const res = await heroApi("setStatus", { id, status: 8 }).catch(e => ({ title: e.message }));
         if (res === "ACCESS_CANCEL") {
             otpSelesai(o, "CANCEL");
-            await bot.editMessageText(otpTeksOrder(o) + "\n❌ <b>Dibatalkan.</b>", { chat_id: o.chatId, message_id: o.messageId, parse_mode: "HTML" }).catch(() => {});
+            await otpGantiPesanOrder(o, "1", { akhir: "❌ <b>Pesanan dibatalkan.</b> Dana dikembalikan ke saldo akun.", markup: otpTombolPesanLagi(`otp_n_${o.service}_${o.country}`) });
             await otpRefund(o, "dibatalkan");
             return jawab("Pesanan dibatalkan, saldo dikembalikan.", false);
         }
@@ -6712,14 +7256,15 @@ async function otpAksi(query, aksi, id) {
             o.status = "WAIT";
             otpSimpan();
             otpMulaiPantau(o);
-            return jawab("Menunggu SMS baru...", false);
+            await otpUpdatePesan(o);
+            return jawab("Menunggu SMS baru, akan muncul otomatis...", false);
         }
         return jawab(`Tidak bisa minta SMS lagi (${heroErr(res) || res}).`);
     }
     if (aksi === "f") { // selesai
         await heroApi("setStatus", { id, status: 6 }).catch(() => {});
         otpSelesai(o, "DONE");
-        await bot.editMessageText(otpTeksOrder(o) + "\n✅ <b>Selesai. Terima kasih!</b>", { chat_id: o.chatId, message_id: o.messageId, parse_mode: "HTML" }).catch(() => {});
+        await otpGantiPesanOrder(o, "1", { akhir: otpStatusTeks(o) + "\n\n✅ <b>Selesai. Terima kasih!</b>", markup: null });
         return jawab("Pesanan selesai.", false);
     }
 }
@@ -6727,13 +7272,14 @@ async function otpAksi(query, aksi, id) {
 bot.on("callback_query", async (query) => {
     const data = query.data || "";
     if (data !== "menu_otp" && !data.startsWith("otp_")) return;
+    if (menuTertutupUntuk(data, query.from.id)) return; // info maintenance dikirim handler utama
     const chatId = query.message.chat.id;
     const messageId = query.message.message_id;
     const userId = query.from.id;
     try {
         if (data === "menu_otp") {
             await bot.answerCallbackQuery(query.id).catch(() => {});
-            return otpTampilMenu(chatId, messageId);
+            return await otpTampilMenu(chatId, messageId);
         }
         if (!otpCfg().apiKey) return bot.answerCallbackQuery(query.id, { text: "Fitur OTP belum aktif.", show_alert: true });
 
@@ -6747,49 +7293,760 @@ bot.on("callback_query", async (query) => {
             await bot.answerCallbackQuery(query.id).catch(() => {});
             if (!aktif.length) return bot.sendMessage(chatId, "Tidak ada pesanan OTP yang aktif.");
             for (const o of aktif) {
-                const sent = await bot.sendMessage(chatId, otpTeksOrder(o), { parse_mode: "HTML", reply_markup: otpKeyboard(o) });
-                o.messageId = sent.message_id; // tampilan terbaru yang di-update
+                o.messageId = await otpKirimPesanOrder(o, "1"); // tampilan terbaru yang di-update
             }
             return otpSimpan();
         }
         let m;
+        // pilih layanan -> minta user mengetik negara
         if ((m = data.match(/^otp_s_([a-z0-9]+)$/i))) {
-            await bot.answerCallbackQuery(query.id, { text: "Mengambil harga..." }).catch(() => {});
-            return otpPilihNegara(chatId, messageId, m[1]);
-        }
-        if ((m = data.match(/^otp_c_([a-z0-9]+)_(\d+)$/i))) {
             await bot.answerCallbackQuery(query.id).catch(() => {});
-            return otpKonfirmasi(chatId, messageId, userId, m[1], m[2]);
+            return await otpMintaNegara(chatId, messageId, m[1]);
         }
-        if ((m = data.match(/^otp_b_([a-z0-9]+)_(\d+)$/i))) return otpBeli(query, m[1], m[2]);
-        if ((m = data.match(/^otp_([kxrf])_(\d+)$/))) return otpAksi(query, m[1], m[2]);
+        // negara dipilih (dari hasil ketik yang cocok lebih dari satu) -> daftar harga
+        if ((m = data.match(/^otp_n_([a-z0-9]+)_(\d+)$/i))) {
+            await bot.answerCallbackQuery(query.id, { text: "Mengambil harga..." }).catch(() => {});
+            return await otpTampilHarga(chatId, messageId, m[1], m[2]);
+        }
+        // tingkat harga dipilih -> konfirmasi
+        if ((m = data.match(/^otp_t_([a-z0-9]+)_(\d+)_([\d.]+)$/i))) {
+            await bot.answerCallbackQuery(query.id).catch(() => {});
+            return await otpKonfirmasi(chatId, messageId, userId, m[1], m[2], Number(m[3]));
+        }
+        if ((m = data.match(/^otp_b_([a-z0-9]+)_(\d+)_([\d.]+)$/i))) return await otpBeliSaldo(query, m[1], m[2], Number(m[3]));
+        if ((m = data.match(/^otp_q_([a-z0-9]+)_(\d+)_([\d.]+)$/i))) return await otpBayarQris(query, m[1], m[2], Number(m[3]));
+        if ((m = data.match(/^otp_([kxrf])_(\d+)$/))) return await otpAksi(query, m[1], m[2]);
+        return bot.answerCallbackQuery(query.id, { text: "Menu ini sudah kedaluwarsa, buka ulang Nomor OTP.", show_alert: true });
     } catch (e) {
+        // await di atas penting: tanpa itu error lolos jadi unhandled rejection
+        const kode = String(e.message || "").split(":")[0];
         console.log("[OTP] callback error:", e.message);
-        bot.answerCallbackQuery(query.id, { text: "⚠️ Server OTP tidak merespons, coba lagi.", show_alert: true }).catch(() => {});
+        otpLaporAdmin(kode, e.message);
+        const teks = OTP_ERR_TEKS[kode] || "Server OTP tidak merespons, coba lagi.";
+        bot.answerCallbackQuery(query.id, { text: "⚠️ " + teks, show_alert: true }).catch(() => {});
     }
 });
 
-// Pencarian layanan OTP
+// Input teks OTP: cari layanan & ketik nama negara
 bot.on("message", async (msg) => {
     const chatId = msg.chat.id;
     const s = userSessions[chatId];
-    if (!s || s.step !== "otp_search" || !msg.text || msg.text.startsWith("/")) return;
-    delete userSessions[chatId];
+    if (!s || s.type !== "otp" || !["otp_search", "otp_negara"].includes(s.step) || !msg.text || msg.text.startsWith("/")) return;
+    const ketik = msg.text.trim();
+    const aman = ketik.replace(/[<>&]/g, "");
     try {
-        const kata = msg.text.trim().toLowerCase();
-        const hasil = (await otpDaftarLayanan())
-            .filter(x => x.code.toLowerCase() === kata || String(x.name).toLowerCase().includes(kata))
-            .slice(0, 10);
-        if (!hasil.length) {
-            return bot.sendMessage(chatId, `Layanan "<b>${msg.text.replace(/[<>&]/g, "")}</b>" tidak ditemukan.`, {
-                parse_mode: "HTML", reply_markup: { inline_keyboard: [[{ text: "🔎 Cari Lagi", callback_data: "otp_cari" }, { text: "⬅️ Menu OTP", callback_data: "menu_otp" }]] }
+        if (s.step === "otp_search") {
+            delete userSessions[chatId];
+            const kata = ketik.toLowerCase();
+            const hasil = (await otpDaftarLayanan())
+                .filter(x => x.code.toLowerCase() === kata || String(x.name).toLowerCase().includes(kata))
+                .slice(0, 10);
+            if (!hasil.length) {
+                return bot.sendMessage(chatId, `Layanan "<b>${aman}</b>" tidak ditemukan.`, {
+                    parse_mode: "HTML", reply_markup: { inline_keyboard: [[{ text: "🔎 Cari Lagi", callback_data: "otp_cari" }, { text: "⬅️ Menu OTP", callback_data: "menu_otp" }]] }
+                });
+            }
+            const baris = hasil.map(x => [{ text: x.name, callback_data: `otp_s_${x.code}` }]);
+            baris.push([{ text: "⬅️ Menu OTP", callback_data: "menu_otp" }]);
+            return bot.sendMessage(chatId, `🔎 Hasil pencarian "${aman}":`, { reply_markup: { inline_keyboard: baris } });
+        }
+
+        // step otp_negara
+        const cocok = otpCariNegara(await otpNegaraMap(), ketik);
+        if (!cocok.length) {
+            return bot.sendMessage(chatId, `Negara "<b>${aman}</b>" tidak ditemukan. Coba ketik nama dalam bahasa Inggris, contoh: <code>malaysia</code>, <code>united kingdom</code>.`, { parse_mode: "HTML" });
+        }
+        if (cocok.length > 1) {
+            const baris = cocok.map(n => [{ text: n.nama, callback_data: `otp_n_${s.service}_${n.id}` }]);
+            baris.push([{ text: "⬅️ Ganti Layanan", callback_data: "menu_otp" }]);
+            return bot.sendMessage(chatId, `Ada beberapa negara yang cocok dengan "${aman}", pilih salah satu:`, { reply_markup: { inline_keyboard: baris } });
+        }
+        delete userSessions[chatId];
+        return await otpTampilHarga(chatId, null, s.service, cocok[0].id);
+    } catch (e) {
+        const kode = String(e.message || "").split(":")[0];
+        otpLaporAdmin(kode, e.message);
+        bot.sendMessage(chatId, "⚠️ " + (OTP_ERR_TEKS[kode] || "Server OTP tidak merespons, coba lagi nanti."));
+    }
+});
+
+// ====================================================
+// OTP BERSAMA (Server 1 & 2): catatan batal, sensor nomor, pesan sukses
+// ====================================================
+const OTP_CATATAN_BATAL = `\n\n<i>ℹ️ OTP tidak masuk? Klik tombol Batalkan dan saldo akan di-refund. Jika bayar dengan QRIS, dana otomatis di-refund ke saldo akun. Selama OTP belum diterima kamu dapat membatalkan pesanan, baik karena OTP tidak masuk maupun berubah pikiran. Jika OTP sudah diterima, pesanan dinyatakan selesai.</i>`;
+const OTP_BOT_URL = "https://t.me/PanelKitaLegalbot";
+
+// +62812******* : kode negara + 3 digit awal terlihat, sisanya bintang
+function otpSensorNomor(phone) {
+    const d = String(phone || "").replace(/\D/g, "");
+    const awal = d.startsWith("62") ? 5 : Math.min(5, Math.max(2, d.length - 4));
+    return "+" + d.slice(0, awal) + "*".repeat(Math.max(3, d.length - awal));
+}
+function otpNamaUser(from) {
+    if (!from) return "User";
+    return from.username ? `@${from.username}` : (from.first_name || "User");
+}
+function otpTombolPesanLagi(cb) {
+    return { inline_keyboard: [[{ text: "🔁 Pesan Lagi", callback_data: cb, style: "success" }]] };
+}
+
+// ID channel testimoni (hardcode, sengaja tidak di settings.js). Kosong = testimoni ke channel tidak dikirim.
+let OTP_TESTI_CHANNEL_ID = "-1003992898454"; // channel testimoni (bot harus admin di channel)
+
+// Gambar OTP dinamis (folder ./gambar-otp, butuh @napi-rs/canvas). Kalau modul/canvas tidak ada,
+// bot tetap jalan dan pesan sukses memakai cadangan (rich message / teks).
+let modulGambarOtp;
+function gambarOtp() {
+    if (modulGambarOtp === undefined) {
+        try { modulGambarOtp = require("./gambar-otp"); }
+        catch (e) { console.log("[gambar-otp] tidak tersedia, pakai cadangan:", e.message); modulGambarOtp = null; }
+    }
+    return modulGambarOtp;
+}
+async function otpBuatGambar(kode) {
+    const g = gambarOtp();
+    if (!g) return null;
+    try {
+        const { buffer, mime } = await g.buatGambarOtp(String(kode));
+        return Buffer.isBuffer(buffer) && buffer.length ? { buffer, mime } : null;
+    } catch (e) {
+        console.log("[gambar-otp] gagal membuat gambar:", e.message); // pesan error tidak memuat kode OTP
+        return null;
+    }
+}
+
+// Kirim satu pesan sukses ke `tujuan`: foto dinamis + caption blockquote + tombol; cadangan rich message lalu teks.
+async function otpKirimPesanSukses(tujuan, o, kode, gambar) {
+    const markup = { reply_markup: { inline_keyboard: [
+        [{ text: "📋 Salin Kode OTP", copy_text: { text: String(kode) } }],
+        [{ text: "🛒 Beli OTP Murah", url: OTP_BOT_URL, style: "success" }]
+    ] } };
+    const baris = [["User", otpEsc(o.username || "User")], ["Layanan", otpEsc(o.serviceName)], ["Nomor", otpSensorNomor(o.phone)], ["OTP", `<code>${otpEsc(kode)}</code>`]];
+    const caption = `<blockquote>✅ <b>OTP BERHASIL DITERIMA</b>\n━━━━━━━━━━━━━━━━━━\n` +
+        baris.map(([k, v]) => `${k} : ${v}`).join("\n") +
+        `</blockquote>\nNomor virtual siap pakai, OTP masuk otomatis. Order di ${OTP_BOT_URL.replace("https://t.me/", "@")}`;
+    if (gambar) {
+        try {
+            const ext = gambar.mime === "image/jpeg" ? "jpg" : String(gambar.mime).split("/")[1];
+            return await bot.sendPhoto(tujuan, gambar.buffer, { caption, parse_mode: "HTML", ...markup }, { filename: `otp.${ext}`, contentType: gambar.mime });
+        } catch (e) { console.log("[OTP] kirim foto sukses gagal, pakai cadangan:", e.message); }
+    }
+    const html = `<h3>✅ OTP BERHASIL DITERIMA</h3>\n<hr/>\n<table bordered striped>\n` +
+        baris.map(([k, v]) => `  <tr><td><b>${k}</b></td><td>${v}</td></tr>`).join("\n") +
+        `\n</table>\n<blockquote>Nomor virtual siap pakai, OTP masuk otomatis. Order sekarang di ${otpEsc(OTP_BOT_URL.replace("https://t.me/", "@"))}</blockquote>`;
+    try {
+        return await sendRichMessage(tujuan, html, markup);
+    } catch (e) {
+        return bot.sendMessage(tujuan, caption, { parse_mode: "HTML", ...markup }).catch(err => console.log("[OTP] pesan sukses gagal:", err.message));
+    }
+}
+
+// Dipanggil sekali saat OTP pertama diterima: log income admin + pesan sukses ke admin + testimoni ke channel.
+// Pesan kode OTP ke user tetap dikirim terpisah oleh otpCekStatus/otp2CekStatus (tidak diubah di sini).
+async function otpKirimSukses(o, server) {
+    if (o.incomeLogged) return;
+    o.incomeLogged = true;
+    const kode = o.codes[o.codes.length - 1];
+    const label = server === "2" ? " (SERVER 2)" : "";
+    bot.sendMessage(settings.adminId, `<blockquote>📱 <b>INCOME: NOMOR OTP${label}</b>\n━━━━━━━━━━━━━━━━━━\n🆔 ID: <code>${o.userId}</code> ${otpEsc(o.username || "")}\n🧩 ${o.serviceName} / ${o.countryName}\n💵 ${otpRp(o.harga)} (modal $${o.cost})\n🧾 Aktivasi: <code>${o.id}</code>\n✅ OTP sudah diterima user</blockquote>`, { parse_mode: "HTML" }).catch(() => {});
+
+    const gambar = await otpBuatGambar(kode); // dibuat sekali, dipakai untuk admin & channel
+    await otpKirimPesanSukses(settings.adminId, o, kode, gambar);
+    if (OTP_TESTI_CHANNEL_ID) {
+        await otpKirimPesanSukses(OTP_TESTI_CHANNEL_ID, o, kode, gambar)
+            .catch(e => console.log("[OTP] testimoni channel gagal:", e.message));
+    }
+}
+function otpEsc(t) { return String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+
+// ---------- Pesan order (halaman menunggu OTP) sebagai tabel rich message ----------
+// Status di bawah tabel; "\n" = baris baru, "\n\n" = paragraf baru.
+function otpStatusTeks(o, akhir) {
+    if (akhir) return akhir;
+    if (o.codes.length) {
+        return `🔑 <b>Kode OTP:</b> <code>${o.codes[o.codes.length - 1]}</code>` +
+            (o.codes.length > 1 ? `\n<i>Kode sebelumnya: ${o.codes.slice(0, -1).join(", ")}</i>` : "") +
+            (o.status === "WAIT" ? `\n\n⏳ <i>Menunggu SMS berikutnya, akan muncul otomatis.</i>` : "");
+    }
+    return `⏳ <b>Menunggu OTP masuk...</b>\n<i>Kode OTP akan muncul otomatis di pesan ini, tidak perlu menekan apa pun.</i>` + OTP_CATATAN_BATAL;
+}
+function otpBarisInfo(o) {
+    const batas = new Date(o.endTime).toLocaleTimeString("id-ID", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit" });
+    return [["Layanan", `<b>${otpEsc(o.serviceName)}</b>`], ["Negara", otpEsc(o.countryName)], ["Nomor", `<code>+${otpEsc(o.phone)}</code>`],
+        ["Harga", otpRp(o.harga)], ["ID", `<code>${otpEsc(o.id)}</code>`], ["Berlaku s/d", `${batas} WIB`]];
+}
+// Kirim pesan order baru (rich: judul + garis + tabel + status; cadangan teks biasa). Hasil: message_id.
+async function otpKirimPesanOrder(o, server, opsi = {}) {
+    const judul = server === "2" ? "📱 NOMOR OTP • SERVER 2" : "📱 NOMOR OTP";
+    const baris = otpBarisInfo(o);
+    const status = otpStatusTeks(o, opsi.akhir);
+    const markup = opsi.markup !== undefined ? opsi.markup : (server === "2" ? otp2Keyboard(o) : otpKeyboard(o));
+    const extra = markup ? { reply_markup: markup } : {};
+    const html = `<h3>${judul}</h3>\n<hr/>\n<table bordered striped>\n` +
+        baris.map(([k, v]) => `  <tr><td><b>${k}</b></td><td>${v}</td></tr>`).join("\n") + `\n</table>\n` +
+        status.split(/\n{2,}/).filter(Boolean).map(par => `<p>${par.replace(/\n/g, "<br>")}</p>`).join("\n");
+    try {
+        const r = await sendRichMessage(o.chatId, html, extra);
+        return r && r.message_id;
+    } catch (e) {
+        const teks = `<blockquote>📱 <b>${judul.replace("📱 ", "")}</b>\n━━━━━━━━━━━━━━━━━━\n` +
+            baris.map(([k, v]) => `${k}: ${v}`).join("\n") + `\n\n${status}</blockquote>`;
+        const m = await bot.sendMessage(o.chatId, teks, { parse_mode: "HTML", ...extra }).catch(() => null);
+        return m && m.message_id;
+    }
+}
+// Rich message tidak di-edit: kirim versi terbaru, lalu hapus pesan lama.
+async function otpGantiPesanOrder(o, server, opsi = {}) {
+    const lama = o.messageId;
+    const baru = await otpKirimPesanOrder(o, server, opsi);
+    if (baru) {
+        o.messageId = baru;
+        if (lama && lama !== baru) await bot.deleteMessage(o.chatId, lama).catch(() => {});
+    }
+}
+
+// ====================================================
+// NOMOR OTP SERVER 2 (provider kedua, protokol SMS-Activate)
+// ====================================================
+// Modul terpisah dari Server 1: fungsi, callback (o2_*), sesi (type "otp2"), file order dan
+// pengaturan (settings.smsbower) sendiri. Nama provider tidak pernah tampil ke user.
+// Yang dipakai bersama hanya helper murni: heroErr, otpRp, otpStok, otpCariNegara, otpKirimRich.
+const OTP2_DB_FILE = "./database/otp2_orders.json";
+const otp2Orders = new Map();     // activationId -> order
+const otp2BeliLock = new Set();
+const otp2Cache = {};
+
+function otp2Cfg() {
+    const c = settings.smsbower || {};
+    return {
+        apiKey: String(c.apiKey || process.env.SMSBOWER_API_KEY || "").trim(),
+        baseUrl: c.baseUrl || "https://smsbower.page/stubs/handler_api.php",
+        kurs: Number(c.kurs) || 17000,             // 1 USD saldo server 2 = Rp
+        markupPersen: c.markupPersen ?? 20,
+        markupMin: c.markupMin ?? 1000,
+        maxTingkat: c.maxTingkat || 20,
+        intervalCek: c.intervalCek || 5000,
+        masaAktifMenit: c.masaAktifMenit || 20,    // dipakai kalau API tidak mengirim waktu habis
+        layanan: Array.isArray(c.layanan) && c.layanan.length ? c.layanan : OTP_LAYANAN_DEFAULT
+    };
+}
+
+async function otp2Api(action, params = {}) {
+    const cfg = otp2Cfg();
+    if (!cfg.apiKey) throw new Error("NO_KEY");
+    const qs = new URLSearchParams({ api_key: cfg.apiKey, action, ...params });
+    const r = await fetch(`${cfg.baseUrl}?${qs.toString()}`, { signal: AbortSignal.timeout(20000) });
+    const txt = (await r.text()).trim();
+    try { return JSON.parse(txt); } catch { return txt; }
+}
+
+const OTP2_ERR_TEKS = { ...OTP_ERR_TEKS, NO_ACTIVATION: "Aktivasi tidak ditemukan.", BAD_ACTION: "Server OTP menolak permintaan." };
+const OTP2_HABIS_DI_HARGA = ["NO_NUMBERS", "WRONG_MAX_PRICE"];
+
+const otp2LaporTerakhir = {};
+function otp2LaporAdmin(kode, detail) {
+    if (!["BAD_KEY", "NO_KEY", "NO_BALANCE", "BANNED"].includes(kode)) return;
+    if (Date.now() - (otp2LaporTerakhir[kode] || 0) < 10 * 60 * 1000) return;
+    otp2LaporTerakhir[kode] = Date.now();
+    const saran = kode === "BAD_KEY" || kode === "NO_KEY" ? "Cek settings.smsbower.apiKey." : "Cek saldo akun server 2.";
+    bot.sendMessage(settings.adminId, `<blockquote>⚠️ <b>OTP SERVER 2 ERROR</b>: <code>${kode}</code>\n${String(detail || "").replace(/[<>&]/g, "")}\n\n${saran}</blockquote>`, { parse_mode: "HTML" }).catch(() => {});
+}
+
+function otp2Harga(cost) {
+    const cfg = otp2Cfg();
+    const modal = Number(cost) * cfg.kurs;
+    const jual = Math.max(modal * (1 + cfg.markupPersen / 100), modal + cfg.markupMin);
+    return Math.ceil(jual / 100) * 100;
+}
+
+async function otp2Cached(key, loader, ttlMs = 6 * 3600 * 1000) {
+    const c = otp2Cache[key];
+    if (c && Date.now() - c.at < ttlMs) return c.data;
+    const data = await loader();
+    otp2Cache[key] = { at: Date.now(), data };
+    return data;
+}
+async function otp2NegaraMap() {
+    return otp2Cached("countries", async () => {
+        const res = await otp2Api("getCountries");
+        if (heroErr(res)) throw new Error(heroErr(res));
+        const list = Array.isArray(res) ? res : Object.values(res || {});
+        const map = {};
+        for (const c of list) if (c && c.id !== undefined) map[String(c.id)] = c.eng || c.rus || `Negara ${c.id}`;
+        return map;
+    });
+}
+async function otp2DaftarLayanan() {
+    return otp2Cached("services", async () => {
+        const res = await otp2Api("getServicesList");
+        if (heroErr(res)) throw new Error(heroErr(res));
+        return (res && res.services) || [];
+    });
+}
+async function otp2NamaLayanan(code) {
+    const lokal = otp2Cfg().layanan.find(l => l.code === code);
+    if (lokal) return lokal.name;
+    const semua = await otp2DaftarLayanan().catch(() => []);
+    return (semua.find(s => s.code === code) || {}).name || code.toUpperCase();
+}
+
+// Urai satu node harga dari berbagai versi getPrices:
+//  V3: { "<providerId>": { cost|price, count } }  -> pilihan per provider (dibeli dengan providerIds)
+//  V2: { "<harga>": <stok> }                      -> pilihan per harga
+//  V1: { cost, count }                            -> 1 harga
+function otp2UraiNode(node) {
+    if (!node || typeof node !== "object" || Array.isArray(node)) return [];
+    if ("cost" in node || "price" in node) {
+        const c = Number(node.cost ?? node.price), n = Number(node.count ?? 0);
+        return c > 0 && n > 0 ? [{ cost: c, stok: n }] : [];
+    }
+    const out = [];
+    for (const [k, v] of Object.entries(node)) {
+        if ((typeof v === "number" || (typeof v === "string" && v.trim() !== "" && !isNaN(v))) && !isNaN(k)) {
+            if (Number(k) > 0 && Number(v) > 0) out.push({ cost: Number(k), stok: Number(v) });
+        } else if (v && typeof v === "object" && ("cost" in v || "price" in v)) {
+            const c = Number(v.cost ?? v.price), n = Number(v.count ?? 0);
+            if (c > 0 && n > 0) out.push({ cost: c, stok: n, pid: /^\d+$/.test(k) ? k : undefined });
+        }
+    }
+    return out;
+}
+function otp2UraiHarga(res, service, country) {
+    if (!res || typeof res !== "object") return [];
+    const kandidat = [res?.[country]?.[service], res?.[service]?.[country], res?.[country], res?.[service], res];
+    for (const node of kandidat) {
+        const t = otp2UraiNode(node);
+        if (t.length) return t;
+    }
+    return [];
+}
+
+// Pilihan harga 1 negara (urut termurah). Sumber: getPricesV3 -> getPricesV2 -> getPrices.
+async function otp2TingkatHarga(service, country) {
+    let baris = [];
+    for (const action of ["getPricesV3", "getPricesV2", "getPrices"]) {
+        try {
+            const res = await otp2Api(action, { service, country: String(country) });
+            const err = heroErr(res);
+            if (err) { if (["BAD_KEY", "NO_KEY"].includes(err)) throw new Error(err); continue; }
+            baris = otp2UraiHarga(res, service, String(country));
+            if (baris.length) break;
+        } catch (e) {
+            if (["BAD_KEY", "NO_KEY"].includes(e.message)) throw e;
+            console.log(`[OTP2] ${action} gagal:`, e.message);
+        }
+    }
+    // Gabungkan yang harga jualnya sama. Satu provider -> simpan pid (beli tepat dari provider itu).
+    const perRp = new Map();
+    for (const b of baris) {
+        const harga = otp2Harga(b.cost);
+        const ada = perRp.get(harga);
+        if (ada) { ada.stok += b.stok; ada.cost = Math.max(ada.cost, b.cost); if (ada.pid !== b.pid) ada.pid = undefined; }
+        else perRp.set(harga, { cost: b.cost, harga, stok: b.stok, pid: b.pid });
+    }
+    return [...perRp.values()].sort((a, b) => a.harga - b.harga).slice(0, otp2Cfg().maxTingkat);
+}
+const otp2Token = t => `${t.cost}_${t.pid || 0}`; // bagian callback_data untuk satu pilihan harga
+
+function otp2Simpan() {
+    try {
+        const data = [...otp2Orders.values()].map(({ timer, busy, ...o }) => o);
+        fs.writeFileSync(OTP2_DB_FILE, JSON.stringify(data, null, 2));
+    } catch (e) { console.log("[OTP2] gagal simpan:", e.message); }
+}
+// OTP dicek otomatis di latar belakang (otp2MulaiPantau), jadi tidak ada tombol "Cek SMS".
+function otp2Keyboard(o) {
+    if (o.codes.length && o.status === "WAIT") {
+        return { inline_keyboard: [[{ text: "✅ Selesai", callback_data: `o2_f_${o.id}`, style: "success" }]] };
+    }
+    if (o.codes.length) {
+        return { inline_keyboard: [[{ text: "🔁 Minta SMS Lagi", callback_data: `o2_r_${o.id}` }, { text: "✅ Selesai", callback_data: `o2_f_${o.id}`, style: "success" }]] };
+    }
+    return { inline_keyboard: [[{ text: "❌ Batalkan", callback_data: `o2_x_${o.id}`, style: "danger" }]] };
+}
+async function otp2UpdatePesan(o) {
+    await otpGantiPesanOrder(o, "2");
+}
+async function otp2Refund(o, alasan) {
+    if (o.refunded) return;
+    o.refunded = true;
+    otp2Simpan();
+    const r = await refundSaldoReal(o.userId, o.harga, `Refund OTP S2 ${o.id} - ${alasan}`).catch(e => ({ status: false, msg: e.message }));
+    if (r && r.status) {
+        bot.sendMessage(o.chatId, `↩️ Saldo ${otpRp(o.harga)} dikembalikan (${alasan}).\nSisa saldo: ${otpRp(r.new_balance || 0)}`).catch(() => {});
+    } else {
+        bot.sendMessage(o.chatId, `⚠️ Refund otomatis gagal. Admin akan memproses manual. ID: ${o.id}`).catch(() => {});
+        bot.sendMessage(settings.adminId, `<blockquote>⚠️ <b>REFUND OTP SERVER 2 GAGAL</b>\n🆔 User: <code>${o.userId}</code>\n🧾 Aktivasi: <code>${o.id}</code>\n💵 ${otpRp(o.harga)}\n❗ ${(r && (r.msg || r.message)) || "-"}</blockquote>`, { parse_mode: "HTML" }).catch(() => {});
+    }
+}
+function otp2Selesai(o, status) {
+    clearInterval(o.timer);
+    o.status = status;
+    otp2Orders.delete(o.id);
+    otp2Simpan();
+}
+async function otp2CekStatus(o) {
+    if (o.busy || !otp2Orders.has(o.id)) return;
+    o.busy = true;
+    try {
+        if (Date.now() > o.endTime) {
+            if (o.codes.length) {
+                await otp2Api("setStatus", { id: o.id, status: 6 }).catch(() => {});
+                otp2Selesai(o, "DONE");
+            } else {
+                await otp2Api("setStatus", { id: o.id, status: 8 }).catch(() => {});
+                otp2Selesai(o, "EXPIRED");
+                await otpGantiPesanOrder(o, "2", { akhir: "⌛ <b>Waktu habis, SMS tidak masuk.</b>", markup: otpTombolPesanLagi(`o2_n_${o.service}_${o.country}`) });
+                await otp2Refund(o, "SMS tidak masuk");
+            }
+            return;
+        }
+        const res = await otp2Api("getStatus", { id: o.id });
+        if (typeof res !== "string") return;
+        if (res.startsWith("STATUS_OK:")) {
+            const kode = res.slice("STATUS_OK:".length).trim();
+            if (!o.codes.includes(kode)) {
+                o.codes.push(kode);
+                o.status = "CODE";
+                clearInterval(o.timer);
+                otp2Simpan();
+                await otp2UpdatePesan(o);
+                bot.sendMessage(o.chatId, `🔑 Kode OTP ${o.serviceName}: <code>${kode}</code>`, { parse_mode: "HTML", reply_markup: { inline_keyboard: [[{ text: "📋 Salin Kode OTP", copy_text: { text: String(kode) } }]] } }).catch(() => {});
+                await otpKirimSukses(o, "2");
+                otp2Simpan();
+            }
+        } else if (res === "STATUS_CANCEL" || res === "NO_ACTIVATION") {
+            otp2Selesai(o, "CANCEL");
+            if (!o.codes.length) {
+                await otpGantiPesanOrder(o, "2", { akhir: "❌ <b>Aktivasi dibatalkan.</b>", markup: otpTombolPesanLagi(`o2_n_${o.service}_${o.country}`) });
+                await otp2Refund(o, "aktivasi dibatalkan");
+            }
+        }
+        // STATUS_WAIT_CODE / STATUS_WAIT_RETRY: tunggu putaran berikutnya
+    } catch (e) {
+        console.log(`[OTP2] cek ${o.id} gagal:`, e.message);
+    } finally {
+        o.busy = false;
+    }
+}
+function otp2MulaiPantau(o) {
+    clearInterval(o.timer);
+    o.timer = setInterval(() => otp2CekStatus(o), otp2Cfg().intervalCek);
+    setTimeout(() => otp2CekStatus(o), 2000); // cek pertama lebih cepat
+}
+try {
+    if (fs.existsSync(OTP2_DB_FILE)) {
+        for (const o of JSON.parse(fs.readFileSync(OTP2_DB_FILE, "utf8")) || []) {
+            otp2Orders.set(o.id, o);
+            if (o.status === "WAIT") otp2MulaiPantau(o);
+        }
+    }
+} catch (e) { console.log("[OTP2] gagal memuat order:", e.message); }
+
+// ---------- Pilih server (pintu masuk dari menu utama) ----------
+async function otpPilihServer(chatId, messageId) {
+    const s1 = !!otpCfg().apiKey, s2 = !!otp2Cfg().apiKey;
+    if (s1 && !s2) return otpTampilMenu(chatId, messageId);   // Server 1 apa adanya
+    if (s2 && !s1) return otp2TampilMenu(chatId, messageId);
+    if (!s1 && !s2) return otpTampilMenu(chatId, messageId);  // tampil "segera hadir" dari Server 1
+    if (messageId) await bot.deleteMessage(chatId, messageId).catch(() => {});
+    return bot.sendMessage(chatId, `<blockquote>📱 <b>NOMOR OTP / VERIFIKASI</b>\n━━━━━━━━━━━━━━━━━━\nPilih server. Stok & harga tiap server berbeda.\n\n<i>Kalau nomor di satu server habis atau SMS tidak masuk, coba server lainnya.</i></blockquote>`, {
+        parse_mode: "HTML",
+        reply_markup: { inline_keyboard: [
+            [{ text: "⚡ Server 1", callback_data: "menu_otp", style: "success" }, { text: "🚀 Server 2", callback_data: "o2_menu", style: "success" }],
+            [{ text: "⬅️ Kembali", callback_data: "back_to_main" }]
+        ] }
+    });
+}
+
+async function otp2TampilMenu(chatId, messageId) {
+    const cfg = otp2Cfg();
+    if (messageId) await bot.deleteMessage(chatId, messageId).catch(() => {});
+    if (!cfg.apiKey) {
+        return bot.sendMessage(chatId, "<blockquote>📱 <b>NOMOR OTP • SERVER 2</b>\n\nServer ini segera hadir.</blockquote>", {
+            parse_mode: "HTML", reply_markup: { inline_keyboard: [[{ text: "⬅️ Pilih Server", callback_data: "pilih_otp_server" }]] }
+        });
+    }
+    const tombol = cfg.layanan.map(l => ({ text: l.name, callback_data: `o2_s_${l.code}` }));
+    const baris = [];
+    for (let i = 0; i < tombol.length; i += 2) baris.push(tombol.slice(i, i + 2));
+    baris.push([{ text: "🔎 Cari Layanan Lain", callback_data: "o2_cari", style: "primary" }, { text: "📜 Pesanan Aktif", callback_data: "o2_aktif", style: "primary" }]);
+    baris.push([{ text: "⬅️ Pilih Server", callback_data: "pilih_otp_server" }]);
+    const teks = `<blockquote>📱 <b>NOMOR OTP • SERVER 2</b>\n━━━━━━━━━━━━━━━━━━\n` +
+        `1️⃣ Pilih layanan\n2️⃣ Ketik nama negara\n3️⃣ Pilih harga (termurah → termahal, stok terlihat)\n4️⃣ Bayar QRIS 1 atau saldo\n5️⃣ Kode OTP dikirim otomatis\n\n` +
+        `<i>SMS tidak masuk? Batalkan, dana kembali ke saldo akun.</i></blockquote>`;
+    return bot.sendMessage(chatId, teks, { parse_mode: "HTML", reply_markup: { inline_keyboard: baris } });
+}
+
+async function otp2MintaNegara(chatId, messageId, service) {
+    const nama = await otp2NamaLayanan(service);
+    userSessions[chatId] = { type: "otp2", step: "otp2_negara", service };
+    if (messageId) await bot.deleteMessage(chatId, messageId).catch(() => {});
+    return bot.sendMessage(chatId, `<blockquote>🌍 <b>${nama}</b> • Server 2\n\nKetik nama negara nomor yang kamu mau.\nContoh: <code>indonesia</code>, <code>malaysia</code>, <code>amerika</code></blockquote>`, {
+        parse_mode: "HTML", reply_markup: { inline_keyboard: [[{ text: "⬅️ Ganti Layanan", callback_data: "o2_menu" }]] }
+    });
+}
+
+async function otp2TampilHarga(chatId, messageId, service, country, opsi = {}) {
+    const [semua, negara, nama] = await Promise.all([otp2TingkatHarga(service, country), otp2NegaraMap(), otp2NamaLayanan(service)]);
+    const tingkat = opsi.kecuali ? semua.filter(t => otp2Token(t) !== opsi.kecuali) : semua;
+    if (messageId) await bot.deleteMessage(chatId, messageId).catch(() => {});
+    const namaNegara = negara[country] || `Negara ${country}`;
+    if (!tingkat.length) {
+        userSessions[chatId] = { type: "otp2", step: "otp2_negara", service };
+        return bot.sendMessage(chatId, `<blockquote>😔 Stok <b>${nama}</b> untuk <b>${namaNegara}</b> di Server 2 sedang kosong.\nKetik nama negara lain, atau coba Server 1.</blockquote>`, {
+            parse_mode: "HTML", reply_markup: { inline_keyboard: [[{ text: "⬅️ Ganti Layanan", callback_data: "o2_menu" }, { text: "⚡ Server 1", callback_data: "menu_otp" }]] }
+        });
+    }
+    const totalStok = tingkat.reduce((s, t) => s + t.stok, 0);
+    const tabel = `<table bordered striped compact>\n  <tr><th>Pilihan</th><th>Harga</th><th>Stok</th></tr>\n` +
+        tingkat.map((t, i) => `  <tr><td>${i + 1}</td><td>${otpRp(t.harga)}</td><td>${otpStok(t.stok)}</td></tr>`).join("\n") + `\n</table>`;
+    const rows = tingkat.map((t, i) => [{ text: `${i + 1}. ${otpRp(t.harga)} • stok ${otpStok(t.stok)}`, callback_data: `o2_t_${service}_${country}_${otp2Token(t)}` }]);
+    rows.push([{ text: "🌍 Ganti Negara", callback_data: `o2_s_${service}` }, { text: "⬅️ Ganti Layanan", callback_data: "o2_menu" }]);
+    return otpKirimRich(chatId, "💰 PILIH HARGA • SERVER 2", [
+        ["Layanan", nama], ["Negara", namaNegara], ["Total Stok", otpStok(totalStok)]
+    ], `${opsi.pesan ? `<p><b>${opsi.pesan}</b></p>\n` : ""}<p>Urut dari termurah. Kalau harga termurah habis, pilih harga berikutnya.</p>\n${tabel}`, rows);
+}
+
+async function otp2Konfirmasi(chatId, messageId, service, country, cost, pid) {
+    const [tingkat, negara, nama] = await Promise.all([otp2TingkatHarga(service, country), otp2NegaraMap(), otp2NamaLayanan(service)]);
+    const token = `${cost}_${pid || 0}`;
+    const t = tingkat.find(x => otp2Token(x) === token) || tingkat.find(x => x.harga === otp2Harga(cost));
+    if (messageId) await bot.deleteMessage(chatId, messageId).catch(() => {});
+    if (!t) {
+        return bot.sendMessage(chatId, "<blockquote>😔 Harga ini baru saja habis. Silakan pilih harga lain.</blockquote>", {
+            parse_mode: "HTML", reply_markup: { inline_keyboard: [[{ text: "⬅️ Pilihan Harga", callback_data: `o2_n_${service}_${country}` }]] }
+        });
+    }
+    const tk = otp2Token(t);
+    const rows = [
+        [{ text: "⚡ Bayar QRIS 1 (Fast)", callback_data: `o2_q_${service}_${country}_${tk}`, style: "success" }],
+        [{ text: "💳 Bayar Pakai Saldo", callback_data: `o2_b_${service}_${country}_${tk}`, style: "primary" }],
+        [{ text: "⬅️ Pilihan Harga", callback_data: `o2_n_${service}_${country}` }]
+    ];
+    return otpKirimRich(chatId, "🧾 KONFIRMASI ORDER OTP • SERVER 2", [
+        ["Layanan", nama], ["Negara", negara[country] || country], ["Stok", otpStok(t.stok)], ["Harga", `<b>${otpRp(t.harga)}</b>`]
+    ], "", rows, "Pilih metode pembayaran. Nomor dibuat otomatis setelah pembayaran berhasil.");
+}
+
+function otp2TawarkanHargaLain(chatId, service, country, cost, pid) {
+    return otp2TampilHarga(chatId, null, service, country, { kecuali: `${cost}_${pid || 0}`, pesan: `⚠️ Nomor di harga ${otpRp(otp2Harga(cost))} sedang tidak tersedia. Pilih harga lain:` })
+        .catch(e => console.log("[OTP2] gagal tampil harga lain:", e.message));
+}
+
+// Beli nomor & buat order. Lempar Error(kode) kalau gagal; pemanggil yang mengembalikan dana.
+async function otp2AmbilNomor({ userId, chatId, service, country, cost, pid, harga, username }) {
+    const params = { service, country: String(country), maxPrice: cost };
+    if (pid) params.providerIds = String(pid); // pilihan harga dari provider tertentu
+    const res = await otp2Api("getNumberV2", params);
+    const err = heroErr(res);
+    if (err || !res || !res.activationId) {
+        const kode = err || "UNKNOWN";
+        otp2LaporAdmin(kode, res && res.details);
+        const e = new Error(kode);
+        e.teksUser = OTP2_ERR_TEKS[kode] || `Gagal mengambil nomor (${kode}).`;
+        throw e;
+    }
+    const negara = await otp2NegaraMap().catch(() => ({}));
+    const o = {
+        id: String(res.activationId), userId, chatId,
+        phone: String(res.phoneNumber),
+        service, serviceName: await otp2NamaLayanan(service),
+        country: String(country), countryName: negara[country] || String(country),
+        harga, cost: Number(res.activationCost) || cost,
+        endTime: Date.parse(res.activationEndTime) || Date.now() + otp2Cfg().masaAktifMenit * 60 * 1000,
+        codes: [], status: "WAIT", refunded: false, messageId: null, username: username || "User", incomeLogged: false
+    };
+    o.messageId = await otpKirimPesanOrder(o, "2");
+    otp2Orders.set(o.id, o);
+    otp2Simpan();
+    otp2MulaiPantau(o);
+    // Log income admin baru dikirim setelah OTP diterima (otpKirimSukses)
+    return o;
+}
+
+async function otp2BeliSaldo(query, service, country, cost, pid) {
+    const userId = query.from.id;
+    const chatId = query.message.chat.id;
+    if (otp2BeliLock.has(userId)) return bot.answerCallbackQuery(query.id, { text: "⏳ Pesanan sebelumnya masih diproses...", show_alert: true });
+    otp2BeliLock.add(userId);
+    const harga = otp2Harga(cost);
+    const tk = `${cost}_${pid || 0}`;
+    let dipotong = 0;
+    try {
+        await bot.answerCallbackQuery(query.id, { text: "Memproses..." }).catch(() => {});
+        const potong = await potongSaldoReal(userId, harga, `Order OTP S2 ${service}/${country}`);
+        if (!potong || !potong.status) {
+            return bot.sendMessage(chatId, `❌ Pembayaran saldo gagal: ${(potong && (potong.msg || potong.message)) || "saldo tidak cukup"}\n💰 Harga: ${otpRp(harga)}\n\nBayar langsung pakai QRIS, atau top up saldo dulu.`, {
+                reply_markup: { inline_keyboard: [
+                    [{ text: "⚡ Bayar QRIS 1 (Fast)", callback_data: `o2_q_${service}_${country}_${tk}`, style: "success" }],
+                    [{ text: "➕ Top Up Saldo", callback_data: "menu_deposit", style: "success" }]
+                ] }
             });
         }
-        const baris = hasil.map(x => [{ text: x.name, callback_data: `otp_s_${x.code}` }]);
-        baris.push([{ text: "⬅️ Menu OTP", callback_data: "menu_otp" }]);
-        bot.sendMessage(chatId, `🔎 Hasil pencarian "${msg.text.replace(/[<>&]/g, "")}":`, { reply_markup: { inline_keyboard: baris } });
+        dipotong = harga;
+        await bot.deleteMessage(chatId, query.message.message_id).catch(() => {});
+        await otp2AmbilNomor({ userId, chatId, service, country, cost, pid, harga, username: otpNamaUser(query.from) });
+        dipotong = 0;
     } catch (e) {
-        bot.sendMessage(chatId, "⚠️ Gagal mengambil daftar layanan, coba lagi nanti.");
+        console.log("[OTP2] beli gagal:", e.message);
+        if (dipotong) {
+            const r = await refundSaldoReal(userId, dipotong, `Refund OTP S2 gagal beli - ${e.message}`).catch(() => ({ status: false }));
+            if (!r || !r.status) bot.sendMessage(settings.adminId, `⚠️ REFUND OTP SERVER 2 GAGAL user ${userId} ${otpRp(dipotong)}: ${e.message}`).catch(() => {});
+            await bot.sendMessage(chatId, `❌ ${e.teksUser || "Terjadi kesalahan."}\n${r && r.status ? "Saldo sudah dikembalikan." : "Admin akan mengembalikan saldo manual."}`).catch(() => {});
+            if (OTP2_HABIS_DI_HARGA.includes(e.message)) await otp2TawarkanHargaLain(chatId, service, country, cost, pid);
+        } else {
+            bot.sendMessage(chatId, `⚠️ ${e.teksUser || "Terjadi kesalahan, coba lagi nanti."}`).catch(() => {});
+        }
+    } finally {
+        otp2BeliLock.delete(userId);
+    }
+}
+
+// QRIS 1: sesi type "otp2" -> pay_qris_tripay -> setelah PAID handlePaymentSuccess -> otp2AmbilNomor
+async function otp2BayarQris(query, service, country, cost, pid) {
+    const userId = query.from.id;
+    const chatId = query.message.chat.id;
+    const [nama, negara] = await Promise.all([otp2NamaLayanan(service), otp2NegaraMap().catch(() => ({}))]);
+    userSessions[userId] = {
+        type: "otp2", service, country: String(country), cost, pid: pid || undefined, harga: otp2Harga(cost),
+        paket: `OTP ${nama} - ${negara[country] || country} (Server 2)`, userId, chatId, tgUser: otpNamaUser(query.from)
+    };
+    return bot.emit("callback_query", { ...query, data: "pay_qris_tripay" });
+}
+
+async function otp2Aksi(query, aksi, id) {
+    const o = otp2Orders.get(id);
+    const jawab = (text, alert = true) => bot.answerCallbackQuery(query.id, { text, show_alert: alert }).catch(() => {});
+    if (!o) return jawab("Pesanan ini sudah selesai / tidak ditemukan.");
+    if (String(o.userId) !== String(query.from.id)) return jawab("Ini bukan pesanan kamu.");
+    if (aksi === "k") {
+        await otp2CekStatus(o);
+        return jawab(o.codes.length ? `🔑 Kode: ${o.codes[o.codes.length - 1]}` : "⏳ SMS belum masuk, tunggu sebentar ya.");
+    }
+    if (aksi === "x") {
+        if (o.codes.length) return jawab("Kode sudah diterima, pesanan tidak bisa dibatalkan.");
+        const res = await otp2Api("setStatus", { id, status: 8 }).catch(e => e.message);
+        if (res === "ACCESS_CANCEL" || res === "ACCESS_CANCEL_ALREADY") {
+            otp2Selesai(o, "CANCEL");
+            await otpGantiPesanOrder(o, "2", { akhir: "❌ <b>Pesanan dibatalkan.</b> Dana dikembalikan ke saldo akun.", markup: otpTombolPesanLagi(`o2_n_${o.service}_${o.country}`) });
+            await otp2Refund(o, "dibatalkan");
+            return jawab("Pesanan dibatalkan, saldo dikembalikan.", false);
+        }
+        const err = heroErr(res);
+        if (err === "EARLY_CANCEL_DENIED") return jawab("Pembatalan baru bisa beberapa menit setelah nomor dibuat. Coba lagi sebentar.");
+        return jawab(`Gagal membatalkan (${err || res}). Coba lagi sebentar.`);
+    }
+    if (aksi === "r") {
+        const res = await otp2Api("setStatus", { id, status: 3 }).catch(e => e.message);
+        if (res === "ACCESS_RETRY_GET") {
+            o.status = "WAIT";
+            otp2Simpan();
+            otp2MulaiPantau(o);
+            await otp2UpdatePesan(o);
+            return jawab("Menunggu SMS baru, akan muncul otomatis...", false);
+        }
+        return jawab(`Tidak bisa minta SMS lagi (${heroErr(res) || res}).`);
+    }
+    if (aksi === "f") {
+        await otp2Api("setStatus", { id, status: 6 }).catch(() => {});
+        otp2Selesai(o, "DONE");
+        await otpGantiPesanOrder(o, "2", { akhir: otpStatusTeks(o) + "\n\n✅ <b>Selesai. Terima kasih!</b>", markup: null });
+        return jawab("Pesanan selesai.", false);
+    }
+}
+
+bot.on("callback_query", async (query) => {
+    const data = query.data || "";
+    if (data !== "pilih_otp_server" && !data.startsWith("o2_")) return;
+    if (menuTertutupUntuk(data, query.from.id)) return; // info maintenance dikirim handler utama
+    const chatId = query.message.chat.id;
+    const messageId = query.message.message_id;
+    const userId = query.from.id;
+    try {
+        if (data === "pilih_otp_server") {
+            await bot.answerCallbackQuery(query.id).catch(() => {});
+            return await otpPilihServer(chatId, messageId);
+        }
+        if (data === "o2_menu") {
+            await bot.answerCallbackQuery(query.id).catch(() => {});
+            return await otp2TampilMenu(chatId, messageId);
+        }
+        if (!otp2Cfg().apiKey) return bot.answerCallbackQuery(query.id, { text: "Server 2 belum aktif.", show_alert: true });
+        if (data === "o2_cari") {
+            await bot.answerCallbackQuery(query.id).catch(() => {});
+            userSessions[chatId] = { type: "otp2", step: "otp2_search" };
+            return bot.sendMessage(chatId, "🔎 Ketik nama aplikasi yang dicari (Server 2), contoh: <code>shopee</code>, <code>gojek</code>, <code>dana</code>:", { parse_mode: "HTML" });
+        }
+        if (data === "o2_aktif") {
+            const aktif = [...otp2Orders.values()].filter(o => String(o.userId) === String(userId));
+            await bot.answerCallbackQuery(query.id).catch(() => {});
+            if (!aktif.length) return bot.sendMessage(chatId, "Tidak ada pesanan OTP Server 2 yang aktif.");
+            for (const o of aktif) {
+                o.messageId = await otpKirimPesanOrder(o, "2");
+            }
+            return otp2Simpan();
+        }
+        let m;
+        if ((m = data.match(/^o2_s_([a-z0-9]+)$/i))) {
+            await bot.answerCallbackQuery(query.id).catch(() => {});
+            return await otp2MintaNegara(chatId, messageId, m[1]);
+        }
+        if ((m = data.match(/^o2_n_([a-z0-9]+)_(\d+)$/i))) {
+            await bot.answerCallbackQuery(query.id, { text: "Mengambil harga..." }).catch(() => {});
+            return await otp2TampilHarga(chatId, messageId, m[1], m[2]);
+        }
+        if ((m = data.match(/^o2_t_([a-z0-9]+)_(\d+)_([\d.]+)_(\d+)$/i))) {
+            await bot.answerCallbackQuery(query.id).catch(() => {});
+            return await otp2Konfirmasi(chatId, messageId, m[1], m[2], Number(m[3]), m[4] !== "0" ? m[4] : undefined);
+        }
+        if ((m = data.match(/^o2_b_([a-z0-9]+)_(\d+)_([\d.]+)_(\d+)$/i))) return await otp2BeliSaldo(query, m[1], m[2], Number(m[3]), m[4] !== "0" ? m[4] : undefined);
+        if ((m = data.match(/^o2_q_([a-z0-9]+)_(\d+)_([\d.]+)_(\d+)$/i))) return await otp2BayarQris(query, m[1], m[2], Number(m[3]), m[4] !== "0" ? m[4] : undefined);
+        if ((m = data.match(/^o2_([kxrf])_(\d+)$/))) return await otp2Aksi(query, m[1], m[2]);
+        return bot.answerCallbackQuery(query.id, { text: "Menu ini sudah kedaluwarsa, buka ulang Nomor OTP.", show_alert: true });
+    } catch (e) {
+        const kode = String(e.message || "").split(":")[0];
+        console.log("[OTP2] callback error:", e.message);
+        otp2LaporAdmin(kode, e.message);
+        bot.answerCallbackQuery(query.id, { text: "⚠️ " + (OTP2_ERR_TEKS[kode] || "Server 2 tidak merespons, coba lagi atau pakai Server 1."), show_alert: true }).catch(() => {});
+    }
+});
+
+bot.on("message", async (msg) => {
+    const chatId = msg.chat.id;
+    const s = userSessions[chatId];
+    if (!s || s.type !== "otp2" || !["otp2_search", "otp2_negara"].includes(s.step) || !msg.text || msg.text.startsWith("/")) return;
+    const ketik = msg.text.trim();
+    const aman = ketik.replace(/[<>&]/g, "");
+    try {
+        if (s.step === "otp2_search") {
+            delete userSessions[chatId];
+            const kata = ketik.toLowerCase();
+            const hasil = (await otp2DaftarLayanan()).filter(x => String(x.code).toLowerCase() === kata || String(x.name).toLowerCase().includes(kata)).slice(0, 10);
+            if (!hasil.length) {
+                return bot.sendMessage(chatId, `Layanan "<b>${aman}</b>" tidak ditemukan di Server 2.`, {
+                    parse_mode: "HTML", reply_markup: { inline_keyboard: [[{ text: "🔎 Cari Lagi", callback_data: "o2_cari" }, { text: "⬅️ Menu Server 2", callback_data: "o2_menu" }]] }
+                });
+            }
+            const baris = hasil.map(x => [{ text: x.name, callback_data: `o2_s_${x.code}` }]);
+            baris.push([{ text: "⬅️ Menu Server 2", callback_data: "o2_menu" }]);
+            return bot.sendMessage(chatId, `🔎 Hasil pencarian "${aman}" (Server 2):`, { reply_markup: { inline_keyboard: baris } });
+        }
+        const cocok = otpCariNegara(await otp2NegaraMap(), ketik);
+        if (!cocok.length) {
+            return bot.sendMessage(chatId, `Negara "<b>${aman}</b>" tidak ditemukan. Coba ketik nama dalam bahasa Inggris, contoh: <code>malaysia</code>, <code>united kingdom</code>.`, { parse_mode: "HTML" });
+        }
+        if (cocok.length > 1) {
+            const baris = cocok.map(n => [{ text: n.nama, callback_data: `o2_n_${s.service}_${n.id}` }]);
+            baris.push([{ text: "⬅️ Ganti Layanan", callback_data: "o2_menu" }]);
+            return bot.sendMessage(chatId, `Ada beberapa negara yang cocok dengan "${aman}", pilih salah satu:`, { reply_markup: { inline_keyboard: baris } });
+        }
+        delete userSessions[chatId];
+        return await otp2TampilHarga(chatId, null, s.service, cocok[0].id);
+    } catch (e) {
+        const kode = String(e.message || "").split(":")[0];
+        otp2LaporAdmin(kode, e.message);
+        bot.sendMessage(chatId, "⚠️ " + (OTP2_ERR_TEKS[kode] || "Server 2 tidak merespons, coba lagi atau pakai Server 1."));
     }
 });
 
@@ -6939,6 +8196,184 @@ async function jalankanBroadcast(msg, raw, pin) {
 
 bot.onText(/^\/broadcast(?:@\w+)?(?:\s+([\s\S]+))?$/, (msg, match) => jalankanBroadcast(msg, match[1], false));
 bot.onText(/^\/broadcastpin(?:@\w+)?(?:\s+([\s\S]+))?$/, (msg, match) => jalankanBroadcast(msg, match[1], true));
+
+// ====================================================
+// TUTUP / BUKA MENU (MAINTENANCE) + KONVERSI VOICE
+// ====================================================
+// /tutupmenu <menu> [keterangan] -> menu ditutup + broadcast pin ke semua user.
+// Saat ditutup, semua tombol menu itu (termasuk sub-tombol & pembayaran ordernya) hanya
+// membalas "menu sedang ditutup" + voice note voice/maintenance.ogg. Berlaku untuk semua orang, termasuk admin.
+const MENU_TUTUP_FILE = path.join(__dirname, "database", "menu_tutup.json"); // absolut: tidak tergantung folder tempat pm2 dijalankan
+const MENU_GRUP = {
+    panel:      { nama: "Beli Panel",          exact: ["menu_panel"], prefix: ["buy_", "confirmbuy_", "klaimvc_", "paket_"], tipe: ["panel"] },
+    vps:        { nama: "Beli VPS",            exact: ["menu_vps", "check_vps_stock"], prefix: ["confvps_", "os_page_"], tipe: ["vps", "vps_dedicated", "vps_shared"] },
+    otp:        { nama: "Nomor OTP",           exact: ["menu_otp", "pilih_otp_server"], prefix: ["otp_", "o2_"], tipe: ["otp", "otp2"] },
+    smm:        { nama: "SMM Panel",           exact: ["smm", "smm_pilih_kategori", "kat", "sks|"], prefix: ["sk|", "k|", "t|", "o|", "c|", "back|", "smo_"], tipe: ["smm", "smm_order"] },
+    patungan:   { nama: "Patungan VPS",        exact: ["menu_patungan"], prefix: ["p_"], tipe: ["patungan"] },
+    install:    { nama: "Install VPS",         exact: ["menu_autoinstall", "buy_jasa_install", "confirminstall_ready"], prefix: [], tipe: ["jasa_install"] },
+    rental:     { nama: "Rental Panel",        exact: ["menu_hourly"], prefix: [], tipe: ["hourly"] },
+    trial:      { nama: "Trial Panel",         exact: ["menu_trial", "start_trial_now"], prefix: [], tipe: [] },
+    pet:        { nama: "Adopsi Pet",          exact: ["menu_pet", "pick_egg", "pick_cat", "pick_tree", "feed_pet", "drink_pet"], prefix: [], tipe: [] },
+    freelance:  { nama: "Freelance",           exact: ["menu_freelance", "menu_withdraw", "withdraw_wallet", "withdraw_qris"], prefix: ["campaign_", "do_"], tipe: [] },
+    deposit:    { nama: "Top Up / Deposit",    exact: ["menu_deposit"], prefix: [], tipe: ["deposit"] },
+    gacha:      { nama: "Gacha Harian",        exact: ["menu_gacha", "roll_gacha"], prefix: [], tipe: [] },
+    perpanjang: { nama: "Perpanjang Server",   exact: ["extend_list"], prefix: ["ext_"], tipe: ["extend"] }
+};
+const MENU_ALIAS = { topup: "deposit", depo: "deposit", nomorotp: "otp", sms: "otp", smmpanel: "smm", autoinstall: "install", jasainstall: "install", hourly: "rental", sewa: "rental", extend: "perpanjang" };
+const MENU_BAYAR = ["pay_via_saldo", "pay_qris_tripay", "pay_crypto_heleket"];
+
+function bacaMenuTutup() {
+    try { return fs.existsSync(MENU_TUTUP_FILE) ? JSON.parse(fs.readFileSync(MENU_TUTUP_FILE, "utf8")) || {} : {}; }
+    catch { return {}; }
+}
+function simpanMenuTutup(data) {
+    try {
+        fs.mkdirSync(path.dirname(MENU_TUTUP_FILE), { recursive: true });
+        fs.writeFileSync(MENU_TUTUP_FILE, JSON.stringify(data, null, 2));
+        return true;
+    } catch (e) {
+        console.log("Gagal simpan menu_tutup:", e.message);
+        return false;
+    }
+}
+function kunciMenu(nama) {
+    const k = String(nama || "").toLowerCase().replace(/[^a-z]/g, "");
+    return MENU_GRUP[k] ? k : (MENU_ALIAS[k] || null);
+}
+// callback_data (+ sesi untuk tombol bayar) -> kunci menu, atau null
+function menuDariCallback(data, session) {
+    if (!data) return null;
+    if (MENU_BAYAR.includes(data) || data.startsWith("qr_server_")) {
+        const tipe = session && String(session.type || "");
+        if (!tipe) return null;
+        return Object.keys(MENU_GRUP).find(k => MENU_GRUP[k].tipe.includes(tipe) || (k === "vps" && tipe.startsWith("vps_"))) || null;
+    }
+    for (const [k, g] of Object.entries(MENU_GRUP)) if (g.exact.includes(data)) return k;
+    for (const [k, g] of Object.entries(MENU_GRUP)) if (g.prefix.some(p => data.startsWith(p))) return k;
+    return null;
+}
+// Kunci menu yang sedang ditutup untuk callback ini (null = boleh lewat). Berlaku juga untuk admin.
+function menuTertutupUntuk(data, userId, session) {
+    const k = menuDariCallback(data, session);
+    return k && bacaMenuTutup()[k] ? k : null;
+}
+
+const voiceMaintenanceTerakhir = new Map(); // userId -> waktu kirim terakhir (anti spam voice)
+async function kirimInfoMenuTutup(chatId, kunci) {
+    const g = MENU_GRUP[kunci] || { nama: kunci };
+    const info = bacaMenuTutup()[kunci] || {};
+    await bot.sendMessage(chatId, `<blockquote>🔧 <b>MENU ${g.nama.toUpperCase()} SEDANG DITUTUP</b>\n\nLayanan sedang <b>Maintenance</b>.` +
+        (info.keterangan ? `\n📝 ${String(info.keterangan).replace(/[<>&]/g, "")}` : "") +
+        `\n\nSilakan coba lagi nanti. Menu lain tetap bisa digunakan.</blockquote>`, {
+        parse_mode: "HTML", reply_markup: { inline_keyboard: [[{ text: "⬅️ Kembali", callback_data: "back_to_main", style: "success" }]] }
+    }).catch(() => {});
+    const terakhir = voiceMaintenanceTerakhir.get(String(chatId)) || 0;
+    if (Date.now() - terakhir < 60 * 1000) return; // voice maksimal 1x per menit per user
+    voiceMaintenanceTerakhir.set(String(chatId), Date.now());
+    const file = path.join(__dirname, "voice", "maintenance.ogg");
+    if (fs.existsSync(file)) await bot.sendVoice(chatId, file).catch(e => console.log("Voice maintenance gagal:", e.message));
+}
+
+function daftarMenuTeks() {
+    const tutup = bacaMenuTutup();
+    return Object.entries(MENU_GRUP).map(([k, g]) => `${tutup[k] ? "🔴" : "🟢"} <code>${k}</code> — ${g.nama}${tutup[k] ? " (ditutup)" : ""}`).join("\n");
+}
+
+bot.onText(/^\/tutupmenu(?:@\w+)?(?:\s+(\S+))?(?:\s+([\s\S]+))?$/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    if (String(chatId) !== String(settings.adminId)) return bot.sendMessage(chatId, "⚠️ Akses Ditolak. Command ini khusus Admin.");
+    if (!match[1]) {
+        return bot.sendMessage(chatId, `<b>🔧 TUTUP MENU (MAINTENANCE)</b>\n\nCara pakai:\n<code>/tutupmenu panel</code>\n<code>/tutupmenu vps Upgrade server sampai jam 22.00</code>\n\nMenu ditutup, lalu pengumuman di-broadcast & di-pin ke semua user. Buka lagi dengan <code>/bukamenu panel</code>.\n\n<b>Daftar menu:</b>\n${daftarMenuTeks()}`, { parse_mode: "HTML" });
+    }
+    const kunci = kunciMenu(match[1]);
+    if (!kunci) return bot.sendMessage(chatId, `❌ Menu "<b>${String(match[1]).replace(/[<>&]/g, "")}</b>" tidak dikenal.\n\n${daftarMenuTeks()}`, { parse_mode: "HTML" });
+    const keterangan = (match[2] || "").trim();
+    const data = bacaMenuTutup();
+    data[kunci] = { sejak: new Date().toISOString(), keterangan };
+    if (!simpanMenuTutup(data)) { // tutup dulu, baru umumkan
+        return bot.sendMessage(chatId, `❌ Gagal menyimpan status menu ke ${MENU_TUTUP_FILE}. Menu BELUM ditutup dan broadcast dibatalkan. Cek izin folder database.`);
+    }
+    if (!bacaMenuTutup()[kunci]) {
+        return bot.sendMessage(chatId, `❌ Status menu tidak terbaca ulang dari ${MENU_TUTUP_FILE}. Menu BELUM ditutup dan broadcast dibatalkan.`);
+    }
+    const nama = MENU_GRUP[kunci].nama;
+    if (!fs.existsSync(path.join(__dirname, "voice", "maintenance.ogg"))) {
+        bot.sendMessage(chatId, "ℹ️ voice/maintenance.ogg belum ada, jadi user hanya menerima teks. Buat dengan /konversivoice.").catch(() => {});
+    }
+    const isi = `<p>🔧 Layanan <b>${nama}</b> sedang <b>maintenance</b> dan untuk sementara akan <b>ditutup</b>.</p>\n` +
+        (keterangan ? `<p>📝 ${bcEscape(keterangan)}</p>\n` : "") +
+        `<p>Menu ${nama} tidak bisa dibuka sampai ada pemberitahuan berikutnya. Layanan lain tetap berjalan normal.</p>\n` +
+        `<p><i>Mohon maaf atas ketidaknyamanannya 🙏</i></p>\n#tombol 🏠 Menu Utama | mainmenu`;
+    await jalankanBroadcast(msg, isi, true);
+});
+
+bot.onText(/^\/bukamenu(?:@\w+)?(?:\s+(\S+))?(?:\s+(umumkan))?\s*$/i, async (msg, match) => {
+    const chatId = msg.chat.id;
+    if (String(chatId) !== String(settings.adminId)) return bot.sendMessage(chatId, "⚠️ Akses Ditolak. Command ini khusus Admin.");
+    if (!match[1]) {
+        return bot.sendMessage(chatId, `Cara pakai: <code>/bukamenu panel</code>\nTambahkan <code>umumkan</code> untuk broadcast bahwa menu sudah dibuka lagi.\n\n${daftarMenuTeks()}`, { parse_mode: "HTML" });
+    }
+    const kunci = kunciMenu(match[1]);
+    if (!kunci) return bot.sendMessage(chatId, `❌ Menu tidak dikenal.\n\n${daftarMenuTeks()}`, { parse_mode: "HTML" });
+    const data = bacaMenuTutup();
+    if (!data[kunci]) return bot.sendMessage(chatId, `ℹ️ Menu <b>${MENU_GRUP[kunci].nama}</b> memang sedang terbuka.`, { parse_mode: "HTML" });
+    delete data[kunci];
+    if (!simpanMenuTutup(data)) return bot.sendMessage(chatId, `❌ Gagal menyimpan status menu ke ${MENU_TUTUP_FILE}. Menu masih tertutup.`);
+    await bot.sendMessage(chatId, `✅ Menu <b>${MENU_GRUP[kunci].nama}</b> dibuka kembali.`, { parse_mode: "HTML" });
+    if (match[2]) {
+        await jalankanBroadcast(msg, `<p>✅ Layanan <b>${MENU_GRUP[kunci].nama}</b> sudah <b>normal kembali</b> dan bisa digunakan lagi.</p>\n<p>Terima kasih sudah menunggu 🙏</p>\n#tombol 🏠 Menu Utama | mainmenu`, false);
+    }
+});
+
+// /konversivoice: ubah audio (wav/mp3/m4a/ogg) jadi voice note Telegram (OGG/Opus mono 48 kHz, sama seperti voice/welcome.ogg)
+//  - balas (reply) pesan audio/voice/file dengan: /konversivoice maintenance
+//  - atau file yang sudah ada di folder voice:   /konversivoice tts_1.wav maintenance
+function konversiKeVoice(input, output) {
+    return new Promise((resolve, reject) => {
+        ffmpeg(input).noVideo().audioChannels(1).audioFrequency(48000).audioCodec("libopus").audioBitrate("32k")
+            .outputOptions(["-application voip"]).format("ogg")
+            .on("end", () => resolve(output)).on("error", reject).save(output);
+    });
+}
+const namaFileAman = n => path.basename(String(n || "")).replace(/[^a-zA-Z0-9._-]/g, "");
+
+bot.onText(/^\/konversivoice(?:@\w+)?(?:\s+(\S+))?(?:\s+(\S+))?\s*$/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    if (String(chatId) !== String(settings.adminId)) return bot.sendMessage(chatId, "⚠️ Akses Ditolak. Command ini khusus Admin.");
+    const voiceDir = path.join(__dirname, "voice");
+    if (!fs.existsSync(voiceDir)) fs.mkdirSync(voiceDir, { recursive: true });
+    const r = msg.reply_to_message;
+    const media = r && (r.voice || r.audio || r.document);
+    let sumber, namaOut;
+    try {
+        if (media) {
+            namaOut = namaFileAman(match[1]) || "voice_" + Date.now();
+            const unduhan = await bot.downloadFile(media.file_id, voiceDir); // API node-telegram-bot-api
+            sumber = path.join(voiceDir, `_sumber_${Date.now()}`);
+            fs.renameSync(unduhan, sumber);
+        } else {
+            if (!match[1]) {
+                const daftar = fs.readdirSync(voiceDir).filter(x => !x.startsWith("_sumber_"));
+                return bot.sendMessage(chatId, `<b>🎙 KONVERSI VOICE</b>\n\n1. Reply file audio/voice dengan:\n<code>/konversivoice maintenance</code>\n2. Atau file di folder voice:\n<code>/konversivoice tts_1.wav maintenance</code>\n\nHasil: <code>voice/&lt;nama&gt;.ogg</code> (OGG/Opus, siap dipakai bot).\n• <code>maintenance.ogg</code> dipakai saat menu ditutup\n• file .ogg lain diputar acak di /start\n\n<b>Isi folder voice:</b>\n${daftar.map(x => `• <code>${x}</code>`).join("\n") || "-"}`, { parse_mode: "HTML" });
+            }
+            const nama = namaFileAman(match[1]);
+            sumber = path.join(voiceDir, nama);
+            if (!fs.existsSync(sumber)) return bot.sendMessage(chatId, `❌ File voice/${nama} tidak ada.`);
+            namaOut = namaFileAman(match[2]) || nama.replace(/\.[^.]+$/, "");
+        }
+        namaOut = namaOut.replace(/\.(ogg|oga)$/i, "");
+        const hasil = path.join(voiceDir, `${namaOut}.ogg`);
+        const sementara = path.join(voiceDir, `_konversi_${Date.now()}.ogg`);
+        await bot.sendMessage(chatId, "⏳ Mengonversi...");
+        await konversiKeVoice(sumber, sementara);
+        fs.renameSync(sementara, hasil); // ganti file lama hanya kalau konversi berhasil
+        await bot.sendVoice(chatId, hasil, { caption: `✅ Tersimpan: voice/${namaOut}.ogg` });
+    } catch (e) {
+        bot.sendMessage(chatId, `❌ Konversi gagal: ${e.message}\nPastikan ffmpeg terpasang di server (apt install ffmpeg).`);
+    } finally {
+        if (sumber && path.basename(sumber).startsWith("_sumber_")) fs.unlink(sumber, () => {});
+    }
+});
 
 // cekid
 bot.onText(/\/cekid/, async (msg) => {
