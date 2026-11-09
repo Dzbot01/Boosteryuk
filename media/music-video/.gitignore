@@ -1,0 +1,8 @@
+node_modules/
+out/shots/
+out/preview/
+out/*.mp4
+out/concat.txt
+out/render.log
+*.part.mp4
+__pycache__/

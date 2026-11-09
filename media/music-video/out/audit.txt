@@ -1,0 +1,12 @@
+PASS | Video 1920x1080 H.264 | h264 1920x1080 yuv420p
+PASS | 30 fps CFR | r=30/1 avg=30/1
+PASS | Frame count vs song | 7012 frames (target 7012)
+PASS | Audio AAC stereo | aac 2ch 48000Hz
+PASS | Duration = song (±0.05 s) | container 233.733 s, video 233.733, audio 233.680, song 233.712
+PASS | Shot frames sum | 77 shots
+PASS | Subtitle cues ordered, ≤2 lines | 35 cues
+PASS | Subtitle ≤42 chars/line | longest line 41 chars
+PASS | No black segments except intended fade | start:233.5 black_end:233.7 black_duration:0.2
+PASS | No sustained white frames (>0.15 s) | none
+
+10/10 checks passed
