@@ -1,7 +1,13 @@
 import { handleVps, isVpsRequest } from "./hostvds/routes";
+import { routeByHost } from "./childpanel/proxy";
 
 export default {
   async fetch(request: Request, env: any, ctx: any) {
+    // Child panel: <sub>.boosteryuk.com → website utama (AeonFree). Untuk api.boosteryuk.com /
+    // *.workers.dev hasilnya null → semua endpoint lama di bawah berjalan seperti biasa.
+    const byHost = await routeByHost(request, env, ctx);
+    if (byHost) return byHost;
+
     const cors = {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
