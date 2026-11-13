@@ -134,6 +134,30 @@ function injectTenant(res: Response, sub: string): Response {
     .transform(res);
 }
 
+/**
+ * Ganti URL absolut domain utama di dalam HTML menjadi host child panel. Penting untuk halaman
+ * tantangan AeonFree (aes.js) yang berisi `location.href="https://boosteryuk.com/?i=1"` — tanpa
+ * ini browser terlempar ke domain utama. Juga berlaku untuk og:url/canonical index.html.
+ * Hanya HTML (kecil); JS/CSS/gambar tidak disentuh.
+ */
+export function rewriteHostsInHtml(html: string, root: string, childHost: string): string {
+  const r = root.replace(/\./g, "\\.");
+  return html
+    .replace(new RegExp(`https?://(?:www\\.)?${r}(?=[/"'\\s?#<]|$)`, "gi"), `https://${childHost}`)
+    .replace(new RegExp(`https?:\\\\/\\\\/(?:www\\.)?${r}(?=\\\\/|["'?#]|$)`, "gi"), `https:\\/\\/${childHost}`);
+}
+
+async function rewriteHtml(res: Response, env: ChildPanelEnv, childHost: string): Promise<Response> {
+  const ct = res.headers.get("content-type") || "";
+  const len = Number(res.headers.get("content-length") || "0");
+  if (!ct.includes("text/html") || len > 2_000_000) return res;
+  const body = rewriteHostsInHtml(await res.text(), rootOf(env), childHost);
+  const headers = new Headers(res.headers);
+  headers.delete("content-length");
+  headers.delete("content-encoding");
+  return new Response(body, { status: res.status, statusText: res.statusText, headers });
+}
+
 const CACHEABLE = /^\/(assets\/|ornaments\/|favicon|apple-touch-icon|og-image|world\.png|.*\.(?:js|css|png|jpe?g|webp|svg|ico|woff2?|mp3)$)/i;
 
 /** Aset statis di-cache di edge Cloudflare — mengurangi hit ke AeonFree. Halaman tantangan tidak pernah di-cache. */
@@ -199,7 +223,8 @@ export async function handleChildPanel(request: Request, env: ChildPanelEnv, ctx
   const originReq = await buildOriginRequest(request, env, sub, url);
   try {
     const res = request.method === "GET" && CACHEABLE.test(url.pathname) ? await fetchCached(originReq, ctx) : await fetch(originReq);
-    return injectTenant(adaptResponse(res, env, url.host, sub), sub);
+    const adapted = await rewriteHtml(adaptResponse(res, env, url.host, sub), env, url.host);
+    return injectTenant(adapted, sub);
   } catch (e) {
     return new Response(
       `<!doctype html><meta charset="utf-8"><title>Child panel tidak tersedia</title><p>Server utama tidak bisa dihubungi. Coba lagi beberapa saat.</p>`,
