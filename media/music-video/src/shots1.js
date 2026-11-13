@@ -78,8 +78,10 @@ add(12.68, 'feet-step', (ctx, lt, T) => {
   ctx.save(); camera(ctx, { zoom: 3.1, x: 860, y: 950 });
   B.bedroom(ctx, T, { tod: 0.3, dim: 0.1 });
   ctx.save(); ctx.globalAlpha = 0.35; ctx.fillStyle = '#fff7d6'; ctx.beginPath(); ctx.moveTo(420, 560); ctx.lineTo(640, 560); ctx.lineTo(1100, 1080); ctx.lineTo(700, 1080); ctx.closePath(); ctx.fill(); ctx.restore();
-  act(ctx, l => merge({ x: 760 + l * 70, y: 965, s: 1, t: T + (l - lt), outfit: 'pajama', turn: 0.6 }, walk(l, 1.1, 30, 18)), lt);
-  for (let k = 0; k < 2; k++) { const tk = 0.45 + k * 0.9; const ph = clamp((lt - tk) / 0.5); if (ph > 0 && ph < 1) for (let i = 0; i < 5; i++) { const a = -Math.PI / 2 + (i - 2) * 0.5; sparkle(ctx, 760 + tk * 70 + (k ? 20 : -20) + Math.cos(a) * 60 * ph, 965 + Math.sin(a) * 40 * ph, 12, P.yellow, 1 - ph); } }
+  const V = 96, STEP = 54; // slow first steps: ~1.8 steps/s; body speed = step length x cadence (no foot sliding)
+  act(ctx, l => merge({ x: 680 + V * l, y: 965, s: 1, t: T + (l - lt), outfit: 'pajama', turn: 0.6 }, C.walkPose(V * l, { step: STEP })), lt);
+  const aF = 0.31 * STEP; // heel-strike lead = half of stance travel
+  for (let k = 1; k <= 3; k++) { const tk = k * STEP / V; const ph = clamp((lt - tk) / 0.5); if (ph > 0 && ph < 1) for (let i = 0; i < 5; i++) { const a = -Math.PI / 2 + (i - 2) * 0.5; sparkle(ctx, 680 + V * tk + aF + Math.cos(a) * 50 * ph, 965 + Math.sin(a) * 30 * ph, 10, P.yellow, 1 - ph); } }
   ctx.restore();
 });
 // S05b fist pump, determined
@@ -325,12 +327,12 @@ add(67.9, 'rocket-ride', (ctx, lt, T) => {
   flash(ctx, lt, 0.2, 0.8);
 }, { trans: 'zoom' });
 add(70.5, 'run-forward', (ctx, lt, T) => {
-  const b = beat(T); const scroll = T * 900;
-  B.sky(ctx, 0, 0, W, H, 0.5, T); B.city(ctx, T, { y0: 760, tod: 0.5, layers: 2, scroll });
+  const b = beat(T); const V = 301, SC = 1.1, scroll = V * SC * T; // run: 112-unit steps at 161.5 steps/min (song tempo)
+  B.sky(ctx, 0, 0, W, H, 0.5, T); B.city(ctx, T, { y0: 760, tod: 0.5, layers: 2, scroll: scroll * 0.45 });
   ctx.fillStyle = '#334155'; ctx.fillRect(0, 820, W, 260);
   for (let i = -1; i < 10; i++) { const x = i * 260 - (scroll % 260); rr(ctx, x, 800, 230, 50, 10); fs(ctx, i % 2 ? P.cyan : P.cyan5, P.out, 5); ICON.bolt(ctx, x + 115, 825, 30, '#fff'); }
   B.hSpeed(ctx, T, { a: 0.4 });
-  act(ctx, l => merge({ x: 900, y: 815, s: 1.1, t: T + (l - lt), turn: 0.85, expr: 'fierce', swingAdd: 0.4 }, run(l, 2.7, 56)), lt);
+  act(ctx, l => merge({ x: 900, y: 818, s: SC, t: T + (l - lt), turn: 0.85, expr: 'fierce', swingAdd: 0.4 }, C.runPose(V * (T + l - lt))), lt);
 });
 add(73.9, 'pov-growth', (ctx, lt, T) => {
   pov(ctx, lt, T, (c, w, h) => U.growthScreen(c, w, h, T, prog(lt, 0.1, 2.2), { from: 128, to: 12800, label: 'Followers' }), { bg: 'brand', glowA: 1, shake: 0.5 });

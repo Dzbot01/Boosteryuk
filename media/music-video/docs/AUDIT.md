@@ -80,3 +80,30 @@ Temuan pada pass kedua (audit otomatis):
 | 18 | HP terlalu besar (seperti tablet) | 64×118 → 54×100 |
 | 19 | Logo LED panggung tertutup kepala | Logo digeser ke 40% tinggi layar |
 | 20 | Kedipan penuh tampak seperti lingkaran mata kosong | Kedipan > 80% digambar sebagai garis kelopak tertutup |
+
+---
+# Audit v1.2 — 13 Nov 2026 (gait, sepatu, rambut)
+
+## Uji numerik (`node tests/gait_check.js`, sampling 120 Hz)
+| Gait | Slip kaki menapak | Celah jangkauan kaki menapak | Turun pinggul maks |
+|---|---|---|---|
+| Jalan cepat (langkah 68, 2,0 langkah/s) | **0,000 px** | **0,00** | 15,8 |
+| Jalan santai (langkah 60) | **0,000 px** | **0,00** | 13,5 |
+| Lari (langkah 112, 161,5 spm) | **0,000 px** | **0,00** | 15,6 |
+
+## Uji visual
+- `tests/gait_sheet.js`: 8 fase jalan + 8 fase lari. Terlihat heel-strike, push-off di bola kaki, fase melayang saat lari, lengan berlawanan dengan kaki, badan condong saat lari, dan kaki/lengan jauh di belakang badan.
+- `tests/head_cu.js`: rambut shaggy di 4 ekspresi dan 3 sudut kepala.
+- Contact sheet scene jalan/lari (feet-step, run-forward, stairs, big-clock, days-walk, chase-star, signpost-walk) dan 22 scene berdiri: sol sepatu rata di tanah dan menyatu dengan ujung celana.
+
+## Temuan & perbaikan
+| # | Temuan | Perbaikan |
+|---|---|---|
+| 21 | Langkah berbasis waktu → kaki meluncur (contoh: big-clock 467 px/s vs langkah ±160 px/s) | Gait berbasis jarak; kecepatan scene = panjang langkah × cadence |
+| 22 | Sepatu terpisah & sedikit terangkat (lingkaran bulat di ujung celana) | Model pergelangan + telapak; sol di tanah, ujung celana di atas sepatu |
+| 23 | Tangga terlalu tinggi (90 px per anak tangga, > panjang kaki) | 30 px per anak tangga, satu anak tangga per langkah |
+| 24 | Kaki tidak sampai ke tanah di langkah terlebar (celah 10–15) | Penurunan pinggul otomatis → 0 |
+| 25 | Alis berhalo kulit terlihat aneh di atas poni | Alis cokelat tua dengan halo kilau rambut |
+| 26 | Rambut belakang membentuk "kait" di sisi rahang | Bagian bawah rambut belakang disembunyikan di balik wajah |
+
+Audit otomatis video final: lihat `out/audit.txt`.

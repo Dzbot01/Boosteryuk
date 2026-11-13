@@ -219,14 +219,30 @@ add(166.4, 'garansi-2', (ctx, lt, T) => {
   act(ctx, l => ({ x: 1380, y: 1000, s: 1.45, t: T + (l - lt), turn: -0.35, expr: 'wink', armR: { x: 40, y: -70, bend: -1, hand: 'thumb' }, armL: { x: -16, y: 96, bend: 1 }, crouch: Math.sin(beat(T + l - lt).phase * Math.PI) * 8 }), lt);
 });
 add(169.5, 'stairs', (ctx, lt, T) => {
-  const camY = lerp(560, 120, E.inOut(clamp(lt / 4.8))), camX = lerp(760, 1180, E.inOut(clamp(lt / 4.8)));
-  ctx.save(); camera(ctx, { zoom: 1.0, x: camX, y: camY });
-  B.sky(ctx, -400, -700, W + 900, H + 1400, 0.42, T, { sun: false });
-  for (let i = 0; i < 6; i++) B.cloudShape(ctx, 300 + i * 330, 600 - i * 180, 70, '#fff', 0.9);
-  const steps = 10; for (let i = 0; i < steps; i++) { const x = 300 + i * 120, y = 980 - i * 90; rr(ctx, x, y, 160, 60, 10); fs(ctx, i % 2 ? P.cyan : P.cyan5, P.out, 6); if (i % 3 === 2) text(ctx, ['1K', '10K', '100K'][Math.floor(i / 3)], x + 80, y + 30, { size: 30, font: 'BG800', color: '#fff' }); }
-  const pos = clamp(lt / 0.42, 0, 9); const i0 = Math.floor(pos), f = pos - i0;
-  const x = 380 + (i0 + f) * 120, y = 980 - i0 * 90 - E.inOut(f) * 90;
-  act(ctx, l => merge({ x, y, s: 0.8, t: T + (l - lt), turn: 0.7, expr: 'grin', shadow: 0 }, walk(l, 1.2, 30, 30)), lt);
+  // Stair climb: one tread per step, lead foot swings two treads, trailing heel rises before toe-off, body leans in.
+  const RISE = 30, RUN = 64, SC = 0.8, X0 = 270, Y0 = 1000;
+  const tread = j => ({ x: X0 + j * RUN + 34, y: Y0 - j * RISE });
+  const climb = l => {
+    const p = clamp(l * 2.15, 0, 10.4), k = Math.floor(p), fr = p - k, sm = E.sine(fr);
+    const root = { x: lerp(tread(k).x, tread(k + 1).x, sm) - 8, y: lerp(tread(k).y, tread(k + 1).y, sm) };
+    const w = clamp(fr / 0.7), from = tread(k - 1), to = tread(k + 1);
+    const swingW = { x: lerp(from.x, to.x, E.sine(w)), y: lerp(from.y, to.y, E.sine(w)) - 34 * Math.sin(Math.PI * w) };
+    const stanceW = tread(k);
+    const A = k % 2 === 0 ? 'legL' : 'legR', Bk = A === 'legL' ? 'legR' : 'legL';
+    const rel = q => ({ x: (q.x - root.x) / SC, y: (q.y - root.y) / SC });
+    const legs = {}; legs[A] = Object.assign(rel(stanceW), { pitch: fr > 0.7 ? -0.65 * ((fr - 0.7) / 0.3) : 0 });
+    legs[Bk] = Object.assign(rel(swingW), { pitch: w < 1 ? lerp(-0.5, 0.12, E.sine(w)) : 0 });
+    const q = (swingW.x - stanceW.x) / RUN / 2; // -1..1 progress of swing leg
+    const armF = side => ({ x: 6 + 26 * side * q, y: 92 - 10 * Math.max(0, side * q), hand: 'fist', z: 0 });
+    const armB = A === 'legL' ? 1 : -1;
+    return { root, pose: Object.assign(legs, { armL: armF(armB), armR: armF(-armB), crouch: 18 + 5 * Math.sin(Math.PI * fr), lean: 0.12 }) };
+  };
+  const c0 = climb(lt);
+  ctx.save(); camera(ctx, { zoom: 1.0, x: c0.root.x + 160, y: c0.root.y - 230 });
+  B.sky(ctx, -400, -900, W + 1400, H + 1700, 0.42, T, { sun: false });
+  for (let i = 0; i < 7; i++) B.cloudShape(ctx, 200 + i * 240, 560 - i * 120, 70, '#fff', 0.9);
+  for (let j = 13; j >= 0; j--) { const x = X0 + j * RUN, y = Y0 - j * RISE; rr(ctx, x, y, RUN + 6, Y0 - y + 160, 8); fs(ctx, j % 2 ? P.cyan : P.cyan5, P.out, 5); if (j === 3 || j === 7 || j === 11) text(ctx, ['1K', '10K', '100K'][(j - 3) / 4], x + RUN / 2 + 3, y + 18, { size: 22, font: 'BG800', color: '#fff' }); }
+  act(ctx, l => { const c = climb(l); return Object.assign({ x: c.root.x, y: c.root.y, s: SC, t: T + (l - lt), turn: 0.7, expr: 'grin', shadow: 0 }, c.pose); }, lt);
   ctx.restore();
 });
 add(174.3, 'podium', (ctx, lt, T) => {
@@ -255,20 +271,23 @@ add(180.0, 'sunset', (ctx, lt, T) => {
 add(182.1, 'big-clock', (ctx, lt, T) => {
   B.brandBg(ctx, T, { col: P.blue, rays: 0.5 });
   U.bigClock(ctx, 960, 470, 330, lt * 3, 1);
-  act(ctx, l => merge({ x: lerp(260, 1660, l / 3), y: 1010, s: 1.1, t: T + (l - lt), turn: 0.85, expr: 'determined' }, walk(l, 1.9, 40, 24)), lt);
+  const V = 136; // brisk walk: 68-unit steps at 2.0 steps/s
+  act(ctx, l => merge({ x: 600 + V * 1.1 * l, y: 1010, s: 1.1, t: T + (l - lt), turn: 0.85, expr: 'determined' }, C.walkPose(V * l, { step: 68 })), lt);
 });
 add(185.1, 'days-walk', (ctx, lt, T) => {
   const tod = (0.3 + lt * 0.33) % 1;
-  B.hills(ctx, T, { tod, scroll: lt * 500 });
+  const V = 122; B.hills(ctx, T, { tod, scroll: V * 1.1 * lt }); // nearest hill scrolls at walking speed
   for (let i = 0; i < 4; i++) { const ph = clamp((lt - i * 0.6) / 1.4); if (ph <= 0 || ph >= 1) continue; ctx.save(); ctx.translate(1700 - ph * 1600, 300 - Math.sin(ph * Math.PI) * 150); ctx.rotate(ph * 6); rr(ctx, -60, -70, 120, 140, 10); fs(ctx, '#fff', P.out, 5); rr(ctx, -60, -70, 120, 34, 10); fs(ctx, P.red, P.out, 5); text(ctx, String(9 + i), 0, 20, { size: 60, font: 'BG800', color: P.navy }); ctx.restore(); }
-  act(ctx, l => merge({ x: 900, y: 960, s: 1.1, t: T + (l - lt), turn: 0.85, expr: 'determined' }, walk(l, 1.9, 40, 24)), lt);
+  act(ctx, l => merge({ x: 900, y: 960, s: 1.1, t: T + (l - lt), turn: 0.85, expr: 'determined' }, C.walkPose(V * l, { step: 64 })), lt);
 });
 add(188.1, 'chase-star', (ctx, lt, T) => {
-  const scroll = T * 700; B.sky(ctx, 0, 0, W, H, 0.5, T); B.city(ctx, T, { y0: 820, tod: 0.5, scroll }); ctx.fillStyle = '#475569'; ctx.fillRect(0, 880, W, 200); line(ctx, 0, 880, W, 880, P.out, 6);
+  const V = 301, SC = 1.1, CX = 400 / 2.4, G = V * SC - CX; // ground scroll + body travel = running speed (no sliding)
+  B.sky(ctx, 0, 0, W, H, 0.5, T); B.city(ctx, T, { y0: 820, tod: 0.5, scroll: G * T * 0.5 }); ctx.fillStyle = '#475569'; ctx.fillRect(0, 880, W, 200); line(ctx, 0, 880, W, 880, P.out, 6);
+  for (let i = 0; i < 14; i++) { const x = (((i * 180 - G * lt) % 2520) + 2520) % 2520 - 180; rr(ctx, x, 930, 100, 12, 6); fs(ctx, '#94a3b8'); }
   B.hSpeed(ctx, T, { a: 0.35 });
   const caught = lt > 2.7; const sx = caught ? null : lerp(1500, 1250, clamp(lt / 2.7)), sy = 420 + Math.sin(T * 4) * 30;
   if (!caught) { glow(ctx, sx, sy, 160, P.yellow, 0.7); starPath(ctx, sx, sy, 60, T * 2); fs(ctx, P.yellow, P.out, 6); text(ctx, 'PELUANG', sx, sy + 100, { size: 40, font: 'BG800', color: '#fff', stroke: P.out, lw: 10 }); }
-  act(ctx, l => { if (l < 2.4) return merge({ x: lerp(500, 900, l / 2.4), y: 880, s: 1.1, t: T + (l - lt), turn: 0.85, expr: 'fierce', swingAdd: 0.4 }, run(l, 2.6, 54)); const jk = clamp((l - 2.4) / 0.8); return { x: lerp(900, 1180, jk), y: 880, s: 1.1, t: T + (l - lt), turn: 0.7, expr: jk > 0.4 ? 'excited' : 'fierce', jump: Math.sin(jk * Math.PI) * 300, armR: { x: 60, y: -120, bend: -1, hand: jk > 0.4 ? 'hold' : 'open' }, armL: { x: -40, y: 30, bend: 1, hand: 'fist' }, legL: { x: -40, y: -20 }, legR: { x: 40, y: -40 },
+  act(ctx, l => { if (l < 2.4) return merge({ x: 500 + CX * l, y: 880, s: SC, t: T + (l - lt), turn: 0.85, expr: 'fierce', swingAdd: 0.4 }, C.runPose(V * l)); const jk = clamp((l - 2.4) / 0.8); return { x: lerp(900, 1180, jk), y: 880, s: 1.1, t: T + (l - lt), turn: 0.7, expr: jk > 0.4 ? 'excited' : 'fierce', jump: Math.sin(jk * Math.PI) * 300, armR: { x: 60, y: -120, bend: -1, hand: jk > 0.4 ? 'hold' : 'open' }, armL: { x: -40, y: 30, bend: 1, hand: 'fist' }, legL: { x: -40, y: -20 }, legR: { x: 40, y: -40 },
     hold: jk > 0.4 ? { Rfront: (c, x, y) => { glow(c, x, y - 40, 120, P.yellow, 0.6); starPath(c, x, y - 40, 50, T); fs(c, P.yellow, P.out, 5); } } : {} }; }, lt);
 });
 add(191.8, 'hold-star', (ctx, lt, T) => {
@@ -282,7 +301,8 @@ add(194.1, 'signpost-walk', (ctx, lt, T) => {
   ctx.beginPath(); ctx.moveTo(300, 1100); ctx.quadraticCurveTo(900, 900, 1500, 760); ctx.lineTo(1580, 770); ctx.quadraticCurveTo(1000, 930, 620, 1100); ctx.closePath(); fs(ctx, '#e7c79a', P.out, 4);
   ctx.save(); ctx.globalAlpha = 0.6 + 0.4 * Math.sin(T * 4); for (let i = 0; i < 6; i++) { const u = (i / 6 + T * 0.2) % 1; const x = lerp(500, 1520, u), y = lerp(1060, 770, u); circ(ctx, x, y, 8); fs(ctx, P.cyan); } ctx.restore();
   U.signpost(ctx, 1240, 860, 0.9);
-  act(ctx, l => merge({ x: lerp(560, 1060, l / 5.8), y: lerp(1030, 900, l / 5.8), s: lerp(1.0, 0.85, l / 5.8), t: T + (l - lt), turn: 0.75, expr: 'calm' }, walk(l, 1.3, 30, 18)), lt);
+  const V = 100, D = 5.8; // calm walk; screen speed = V * scale(t), integrated so steps match travel
+  act(ctx, l => { const x = 560 + V * (l - 0.15 * l * l / (2 * D)); return merge({ x, y: 1030 - 0.26 * (x - 560), s: lerp(1.0, 0.85, l / D), t: T + (l - lt), turn: 0.75, expr: 'calm' }, C.walkPose(V * l, { step: 60 })); }, lt);
   ctx.restore();
 });
 add(199.9, 'turn-grin', (ctx, lt, T) => {

@@ -1,11 +1,11 @@
 'use strict';
 // Expressive rubber-hose cartoon character rig.
 // Character space: origin = point between the feet on the ground, y grows downward (up is negative).
-const { clamp, lerp, ell, circ, rr, fs, rgba, P, heartPath, starPath, sparkle, text, noise, hash, glow, line } = require('./engine');
+const { clamp, lerp, ell, circ, rr, fs, rgba, mixC, P, heartPath, starPath, sparkle, text, noise, hash, glow, line } = require('./engine');
 
 const OUT = P.out;
 const CAST = {
-  main: { skin: '#e4a774', skinD: '#c98a59', hair: '#1d1714', hairH: '#3d3029', style: 'spiky', iris: '#3a2416' },
+  main: { skin: '#e4a774', skinD: '#c98a59', hair: '#7a4a26', hairH: '#b97c45', hairD: '#4e2d15', style: 'shaggy', iris: '#3a2416' },
   sari: { skin: '#f1c49c', skinD: '#d8a477', hair: '#40261a', hairH: '#61402c', style: 'long', iris: '#3a2416' },
   budi: { skin: '#b97a4c', skinD: '#9c6039', hair: '#141212', hairH: '#2e2b2b', style: 'buzz', iris: '#24160e' },
   maya: { skin: '#f3d0aa', skinD: '#dcb186', hair: '#7a3a1e', hairH: '#a35a33', style: 'bun', iris: '#3a2416' },
@@ -65,7 +65,7 @@ function exprVals(expr) {
 const DEF = {
   x: 960, y: 900, s: 1, flip: 1, turn: 0, lean: 0, crouch: 0, jump: 0, squash: 0, headTilt: 0, headDX: 0, headDY: 0,
   armL: { x: -16, y: 100, bend: 1, hand: 'open' }, armR: { x: 16, y: 100, bend: -1, hand: 'open' },
-  legL: { x: -30, y: 0, bend: 1 }, legR: { x: 30, y: 0, bend: -1 },
+  legL: { x: -27, y: 0, bend: 1 }, legR: { x: 27, y: 0, bend: -1 },
   expr: 'neutral', face: null, look: [0, 0], outfit: 'hoodie', cast: 'main', acc: {}, fx: {}, hold: {}, t: 0,
   blink: true, talk: 0, shadow: 1, hideLegs: false, armsBehind: false,
 };
@@ -88,7 +88,7 @@ function rot(x, y, a) { const c = Math.cos(a), s = Math.sin(a); return { x: x * 
 // Two-bone IK in 3D (x right, y down, z toward camera) projected orthographically.
 // Segment lengths are fixed (no rubber stretching); the bend plane is chosen by a pole vector,
 // so elbows always flex the anatomical way (down/out/back) and knees bend forward/outward.
-const L_UP = 62, L_FORE = 58, L_THIGH = 59, L_SHIN = 57;
+const L_UP = 62, L_FORE = 58, L_THIGH = 50, L_SHIN = 48; // legs: hip->ankle ≈ standing height (straight knees)
 function rotY(v, a) { const c = Math.cos(a), s = Math.sin(a); return { x: v.x * c + v.z * s, y: v.y, z: -v.x * s + v.z * c }; }
 function ik3(S, T, L1, L2, pole) {
   let dx = T.x - S.x, dy = T.y - S.y, dz = T.z - S.z; let d = Math.hypot(dx, dy, dz) || 1e-6;
@@ -114,19 +114,50 @@ function mouthPos(p, head) { // mouth in character space
   const th = p.turn * 0.8; const m = rot(84 * Math.sin(th) * 0.95, 52, p.lean + p.headTilt);
   return { x: head.x + m.x, y: head.y + m.y };
 }
+// Foot model (character units). Shape points: [u forward, v down from ankle]; ground (sole) at v = 13.
+const ANKLE_H = 18;
+const FOOT_SIDE = [[-13, 18], [-16, 6], [-12, -7], [-2, -10], [10, -7], [22, 0], [32, 6], [36, 12], [33, 18]];
+const FOOT_FRONT = [[-20, 18], [-23, 5], [-19, -8], [-6, -11], [8, -11], [19, -6], [24, 2], [25, 10], [21, 18]];
+function footShape(f, w) { // f: toe direction (+1 right / -1 left), w: 0 front view .. 1 profile
+  return FOOT_FRONT.map((q, i) => ({ x: f * lerp(q[0], FOOT_SIDE[i][0], w), y: q[1] }));
+}
+// Ankle position from the ground contact point C (under the ankle when the foot is flat) and foot pitch.
+// pitch > 0: toe up, rolling on the heel (heel strike); pitch < 0: heel up, rolling on the ball (push-off).
+function footPose(C, pitch, f, w) {
+  const pts = footShape(f, w); const heel = pts[0], toe = pts[8];
+  const ball = { x: lerp(heel.x, toe.x, 0.74), y: ANKLE_H };
+  const piv = pitch > 0 ? heel : pitch < 0 ? ball : { x: 0, y: ANKLE_H };
+  const a = -pitch * f;
+  const r = rot(piv.x, piv.y, a);
+  // pivot stays fixed at C + (piv.x, 0); ankle = pivot - R(a)·piv
+  return { ankle: { x: C.x + piv.x - r.x, y: C.y - r.y }, a, pts };
+}
 function geo(p) {
   const sx = 1 - p.squash * 0.5, sy = 1 + p.squash;
-  const hip = { x: 0, y: -110 + p.crouch };
+  const th = p.turn * 0.8, ct = Math.cos(th), st = Math.sin(th);
+  const bw = 0.58 + 0.42 * ct; // body width foreshortening when the body turns
+  // Pelvis drop: if a planted foot can't be reached with a slightly bent knee, lower the hips (as in double support).
+  const wF = clamp(Math.abs(st) * 1.25), LMAX = (L_THIGH + L_SHIN) * 0.975;
+  let drop = 0;
+  if (!p.hideLegs) for (const [side, leg] of [[-1, p.legL], [1, p.legR]]) {
+    if (leg.y < -1) continue;
+    const f = Math.abs(st) > 0.18 ? Math.sign(st) : side;
+    const an = footPose({ x: leg.x, y: leg.y }, leg.pitch || 0, f, wF).ankle;
+    const hx = rot(side * 24 * bw * sx, -8 * sy, p.lean).x, hy0 = -110 + p.crouch + rot(side * 24 * bw * sx, -8 * sy, p.lean).y;
+    const dx = an.x - hx; if (Math.abs(dx) >= LMAX) continue;
+    const need = (an.y - Math.sqrt(LMAX * LMAX - dx * dx)) - hy0; if (need > drop) drop = need;
+  }
+  const hip = { x: 0, y: -110 + p.crouch + drop };
   const T = (lx, ly) => { const v = rot(lx * sx, ly * sy, p.lean); return { x: hip.x + v.x, y: hip.y + v.y }; };
-  const shL = T(-50, -84), shR = T(50, -84);
-  const hpL = T(-24, -8), hpR = T(24, -8);
+  const shL = T(-50 * bw, -84), shR = T(50 * bw, -84);
+  const hpL = T(-24 * bw, -8), hpR = T(24 * bw, -8);
   const neck = T(0, -98);
   const hd = rot(p.headDX, -74 + p.headDY, p.lean + p.headTilt);
   const head = { x: neck.x + hd.x, y: neck.y + hd.y };
   const mouth = mouthPos(p, head);
-  const th = p.turn * 0.8;
   const arms = {};
   for (const [k, side, sh, arm] of [['L', -1, shL, p.armL], ['R', 1, shR, p.armR]]) {
+    const zs = -side * 50 * st; // shoulder depth (near side > 0)
     let t2, z;
     if (p.mic === k) { // hand below/beside the mouth, mic aimed between lower lip and chin
       t2 = { x: mouth.x + side * 30, y: mouth.y + 66 }; z = 46;
@@ -136,16 +167,20 @@ function geo(p) {
     }
     const pole = rotY({ x: side * 0.5, y: 1, z: -0.6 }, th);
     if (arm.elbowOut) { pole.x += side * arm.elbowOut; pole.y -= arm.elbowOut * 0.5; }
-    const r = ik3({ x: sh.x, y: sh.y, z: 0 }, { x: t2.x, y: t2.y, z }, L_UP, L_FORE, pole);
-    arms[k] = { S: sh, E: r.E, H: r.H, flex: r.flex };
+    const r = ik3({ x: sh.x, y: sh.y, z: zs }, { x: t2.x, y: t2.y, z: zs + z }, L_UP, L_FORE, pole);
+    arms[k] = { S: sh, E: r.E, H: r.H, flex: r.flex, z: zs };
   }
   const legs = {};
+  const w = clamp(Math.abs(st) * 1.25);
   for (const [k, side, hp, leg] of [['L', -1, hpL, p.legL], ['R', 1, hpR, p.legR]]) {
+    const zh = -side * 24 * st;
+    const f = Math.abs(st) > 0.18 ? Math.sign(st) : side; // toes point where the body faces (slight toe-out in front view)
+    const fp = footPose({ x: leg.x, y: leg.y }, leg.pitch || 0, f, w);
     const pole = rotY({ x: side * 0.35, y: 0, z: 1 }, th);
-    const r = ik3({ x: hp.x, y: hp.y, z: 0 }, { x: leg.x, y: leg.y, z: leg.z || 0 }, L_THIGH, L_SHIN, pole);
-    legs[k] = { S: hp, E: r.E, H: r.H };
+    const r = ik3({ x: hp.x, y: hp.y, z: zh }, { x: fp.ankle.x, y: fp.ankle.y, z: leg.z !== undefined ? leg.z : zh }, L_THIGH, L_SHIN, pole);
+    legs[k] = { S: hp, E: r.E, H: r.H, z: zh, a: fp.a, pts: fp.pts, gap: Math.hypot(r.H.x - fp.ankle.x, r.H.y - fp.ankle.y) };
   }
-  return { sx, sy, hip, T, shL, shR, hL: arms.L.H, hR: arms.R.H, hpL, hpR, neck, head, mouth, arms, legs };
+  return { drop, sx, sy, bw, st, hip, T, shL, shR, hL: arms.L.H, hR: arms.R.H, hpL, hpR, neck, head, mouth, arms, legs };
 }
 
 // ---------- limbs ----------
@@ -155,10 +190,10 @@ function jointPath(ctx, A, B, C) {
   const p1 = { x: B.x + (A.x - B.x) * r / ab, y: B.y + (A.y - B.y) * r / ab }, p2 = { x: B.x + (C.x - B.x) * r / bc, y: B.y + (C.y - B.y) * r / bc };
   ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(p1.x, p1.y); ctx.quadraticCurveTo(B.x, B.y, p2.x, p2.y); ctx.lineTo(C.x, C.y);
 }
-function joint(ctx, A, B, C, w, col, cuff) {
-  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+function joint(ctx, A, B, C, w, col, cuff, cap = 'round') {
+  ctx.lineCap = cap; ctx.lineJoin = 'round';
   jointPath(ctx, A, B, C); ctx.strokeStyle = OUT; ctx.lineWidth = w + 10; ctx.stroke();
-  ctx.strokeStyle = col; ctx.lineWidth = w; ctx.stroke();
+  ctx.strokeStyle = col; ctx.lineWidth = w; ctx.stroke(); ctx.lineCap = 'round';
   if (cuff) { const p1 = { x: lerp(B.x, C.x, 0.74), y: lerp(B.y, C.y, 0.74) }, p2 = { x: lerp(B.x, C.x, 0.88), y: lerp(B.y, C.y, 0.88) }; ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.strokeStyle = cuff; ctx.lineWidth = w; ctx.lineCap = 'butt'; ctx.stroke(); ctx.lineCap = 'round'; }
   return Math.atan2(C.y - B.y, C.x - B.x);
 }
@@ -226,15 +261,26 @@ function hand(ctx, x, y, ang, type, cast, side) {
   ctx.restore();
 }
 
-function shoe(ctx, ft, side, p, o, cast) {
-  const dir = Math.abs(p.turn) > 0.25 ? Math.sign(p.turn) : side * 0.5;
-  const x = ft.x + dir * 9, y = ft.y - 7;
-  if (o.shoe === 'skin') { ell(ctx, x, y + 2, 20, 12); fs(ctx, cast.skin, OUT, 5); return; }
-  ctx.save(); ctx.translate(x, y); ctx.rotate(clamp((ft.lift || 0) * -0.01 * dir, -0.5, 0.5));
-  ctx.beginPath(); ctx.moveTo(-22, 8); ctx.quadraticCurveTo(-24, -12, -4, -13); ctx.quadraticCurveTo(26 * Math.sign(dir || 1) * 0 + 24, -8, 26, 6); ctx.quadraticCurveTo(26, 10, 20, 10); ctx.lineTo(-18, 10); ctx.closePath();
-  fs(ctx, o.shoe, OUT, 5);
-  if (o.sole) { rr(ctx, -21, 4, 46, 7, 3); fs(ctx, o.sole); }
-  ctx.restore();
+// Shoe attached at the ankle (end of the shin); sole on the ground, rotates about heel/ball with the foot pitch.
+function shoe(ctx, L, o, cast) {
+  const A = L.H, pts = L.pts.map(q => { const r = rot(q.x, q.y, L.a); return { x: A.x + r.x, y: A.y + r.y }; });
+  const path = () => {
+    ctx.beginPath(); const n = pts.length; const m0 = { x: (pts[n - 1].x + pts[0].x) / 2, y: (pts[n - 1].y + pts[0].y) / 2 }; ctx.moveTo(m0.x, m0.y);
+    for (let i = 0; i < n; i++) { const a = pts[i], b = pts[(i + 1) % n]; ctx.quadraticCurveTo(a.x, a.y, (a.x + b.x) / 2, (a.y + b.y) / 2); }
+    ctx.closePath();
+  };
+  if (o.shoe === 'skin') { path(); fs(ctx, cast.skin, OUT, 5); return; }
+  path(); fs(ctx, o.shoe, OUT, 5);
+  if (o.sole) { // sole band along the bottom edge
+    ctx.save(); path(); ctx.clip();
+    const h0 = pts[0], t0 = pts[8]; const ang = Math.atan2(t0.y - h0.y, t0.x - h0.x);
+    ctx.translate(h0.x, h0.y); ctx.rotate(ang);
+    const len = Math.hypot(t0.x - h0.x, t0.y - h0.y);
+    ctx.fillStyle = o.sole; ctx.fillRect(Math.min(0, -len) - 30, -5, Math.abs(len) + 60, 20);
+    ctx.restore(); path(); fs(ctx, null, OUT, 5);
+  }
+  const c1 = pts[3], c2 = pts[5];
+  line(ctx, lerp(c1.x, c2.x, 0.3), lerp(c1.y, c2.y, 0.3) + 3, lerp(c1.x, c2.x, 0.7), lerp(c1.y, c2.y, 0.7) + 3, rgba(OUT, 0.35), 2.5);
 }
 
 // ---------- torso ----------
@@ -256,6 +302,7 @@ function torso(ctx, p, o, cast, swing) {
   } else { ctx.fillStyle = o.topD; ctx.fillRect(-60, -4, 120, 20); }
   ctx.restore();
   bodyPath(ctx); fs(ctx, null, OUT, 5);
+  ctx.save(); ctx.translate(Math.sin(p.turn * 0.8) * 20, 0);
   if (p.outfit === 'pajama') {
     ctx.beginPath(); ctx.moveTo(-24, -102); ctx.lineTo(0, -74); ctx.lineTo(24, -102); fs(ctx, null, OUT, 4);
     for (const by of [-60, -38, -16]) { circ(ctx, 0, by, 4); fs(ctx, '#fff', OUT, 2); }
@@ -273,6 +320,7 @@ function torso(ctx, p, o, cast, swing) {
       ctx.beginPath(); ctx.moveTo(1.5, -7); ctx.lineTo(-4.5, 1); ctx.lineTo(-0.5, 1); ctx.lineTo(-1.5, 7); ctx.lineTo(4.5, -1); ctx.lineTo(0.5, -1); ctx.closePath(); fs(ctx, P.cyan6); ctx.restore();
     }
   }
+  ctx.restore();
   if (p.acc.apron) {
     ctx.beginPath(); ctx.moveTo(-34, -78); ctx.lineTo(34, -78); ctx.lineTo(38, 10); ctx.quadraticCurveTo(0, 16, -38, 10); ctx.closePath(); fs(ctx, '#b45309', OUT, 4);
     rr(ctx, -18, -40, 36, 22, 5); fs(ctx, '#92400e', OUT, 3);
@@ -281,7 +329,53 @@ function torso(ctx, p, o, cast, swing) {
 }
 
 // ---------- head ----------
+// Shaggy/mushroom cut (reference: chibi boy brown hair): rounded volume wider than the face, long pointed bangs
+// of varied length down to the eye line, side locks over the upper ear, angular shine band, darker underside.
+function shaggyBack(ctx, cast, th, swing) {
+  const cx = -Math.sin(th) * 12;
+  ctx.beginPath(); ctx.moveTo(cx - 102, -8);
+  ctx.ellipse(cx, -10, 102, 98, 0, Math.PI, Math.PI * 2, false);
+  ctx.quadraticCurveTo(cx + 106, 22, cx + 70, 34); ctx.lineTo(cx - 70, 34);
+  ctx.quadraticCurveTo(cx - 106, 22, cx - 102, -8); ctx.closePath();
+  fs(ctx, cast.hairD || cast.hair, OUT, 5);
+}
+function shaggyFront(ctx, cast, th, swing) {
+  const R = 92; const sx = phi => R * Math.sin(clamp(phi + th, -1.5707, 1.5707));
+  const cx = -Math.sin(th) * 5; const sw = swing * 6;
+  const fr = [[1.30, 6], [1.10, -22], [0.96, 2], [0.82, -28], [0.66, -9], [0.52, -30], [0.36, -3], [0.20, -32], [0.06, 9], [-0.10, -30], [-0.26, 2], [-0.42, -28], [-0.56, -10], [-0.72, -30], [-0.90, 4], [-1.10, -22], [-1.30, 6]];
+  const P = fr.map(([ph, y]) => { const tip = y > -15; return { x: sx(ph) + (tip ? sw : sw * 0.3), y: y + (tip ? Math.abs(swing) * 2 : 0), tip }; });
+  const rx = 103, ry = 98, cy = -12;
+  const path = () => {
+    ctx.beginPath(); ctx.moveTo(cx - rx, cy);
+    ctx.ellipse(cx, cy, rx, ry, 0, Math.PI, Math.PI * 2, false);
+    ctx.quadraticCurveTo(cx + rx + 1, 6, cx + 92 + sw, 24);            // right side lock tip (over the upper ear)
+    ctx.quadraticCurveTo(cx + 82, 10, P[0].x, P[0].y);
+    for (let i = 1; i < P.length; i++) {
+      const a = P[i - 1], b = P[i];
+      if (b.tip) ctx.quadraticCurveTo(lerp(a.x, b.x, 0.3), lerp(a.y, b.y, 0.85), b.x, b.y);   // strand edge falls to a point
+      else ctx.quadraticCurveTo(lerp(a.x, b.x, 0.2), lerp(a.y, b.y, 0.55), b.x, b.y);         // notch back up between strands
+    }
+    ctx.quadraticCurveTo(cx - 82, 10, cx - 92 + sw, 24);               // left side lock tip
+    ctx.quadraticCurveTo(cx - rx - 1, 6, cx - rx, cy); ctx.closePath();
+  };
+  path(); ctx.strokeStyle = OUT; ctx.lineWidth = 10; ctx.lineJoin = 'round'; ctx.stroke(); ctx.fillStyle = cast.hair; ctx.fill();
+  ctx.save(); path(); ctx.clip();
+  const g = ctx.createLinearGradient(0, -50, 0, 12); g.addColorStop(0, rgba(cast.hairD, 0)); g.addColorStop(1, rgba(cast.hairD, 0.7));
+  ctx.fillStyle = g; ctx.fillRect(cx - 120, -50, 240, 100);
+  for (const t of P.filter(q => q.tip)) { ctx.beginPath(); ctx.moveTo(lerp(cx, t.x, 0.75), t.y - 62); ctx.quadraticCurveTo(t.x * 0.97, t.y - 26, t.x, t.y - 5); fs(ctx, null, rgba(cast.hairD, 0.85), 3.5); }
+  ctx.fillStyle = rgba(cast.hairH, 0.9);
+  const segs = [[198, 210], [214, 232], [236, 248], [252, 272], [276, 288], [292, 310], [314, 326], [330, 338]];
+  const o = -Math.sin(th) * 10, d = Math.PI / 180;
+  for (const [a0, a1] of segs) {
+    const A = a0 * d, B = a1 * d, r0 = 62, r1 = 76;
+    ctx.beginPath(); ctx.moveTo(cx + o + Math.cos(A) * r0 * 1.12, -16 + Math.sin(A) * r0); ctx.lineTo(cx + o + Math.cos(B) * r0 * 1.12, -16 + Math.sin(B) * r0);
+    ctx.lineTo(cx + o + Math.cos(B - 0.06) * r1 * 1.12, -16 + Math.sin(B - 0.06) * r1); ctx.lineTo(cx + o + Math.cos(A - 0.06) * r1 * 1.12, -16 + Math.sin(A - 0.06) * r1); ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+  path(); fs(ctx, null, OUT, 5);
+}
 function hairBack(ctx, cast, th, swing) {
+  if (cast.style === 'shaggy') return shaggyBack(ctx, cast, th, swing);
   const shift = -Math.sin(th) * 10;
   ctx.fillStyle = cast.hair;
   if (cast.style === 'long') {
@@ -292,6 +386,7 @@ function hairBack(ctx, cast, th, swing) {
   ell(ctx, shift, -12, 93, 88); fs(ctx, cast.hair, OUT, 5);
 }
 function hairFront(ctx, cast, th, swing) {
+  if (cast.style === 'shaggy') return shaggyFront(ctx, cast, th, swing);
   const R = 93; const sx = phi => R * Math.sin(clamp(phi + th, -1.5707, 1.5707));
   const cx = -Math.sin(th) * 4;
   const list = [];
@@ -424,7 +519,8 @@ function drawHead(ctx, p, cast, swing) {
     const bx = fx(phi), by = -21 + E.browY; const L = 15 * (0.45 + 0.55 * z);
     const inner = by - E.browAng * 13, outer = by + E.browAng * 13 * 0.6 + 2;
     ctx.beginPath(); ctx.moveTo(bx + side * L, outer); ctx.quadraticCurveTo(bx, by - 5, bx - side * L, inner);
-    ctx.strokeStyle = cast.skin; ctx.lineWidth = 13; ctx.lineCap = 'round'; ctx.stroke(); ctx.strokeStyle = OUT; ctx.lineWidth = 8; ctx.stroke(); ctx.strokeStyle = cast.hair; ctx.lineWidth = 4; ctx.stroke();
+    if (cast.style === 'shaggy') { ctx.strokeStyle = rgba(cast.hairH, 0.55); ctx.lineWidth = 11; ctx.lineCap = 'round'; ctx.stroke(); ctx.strokeStyle = '#2a170b'; ctx.lineWidth = 6.5; ctx.stroke(); }
+    else { ctx.strokeStyle = cast.skin; ctx.lineWidth = 13; ctx.lineCap = 'round'; ctx.stroke(); ctx.strokeStyle = OUT; ctx.lineWidth = 8; ctx.stroke(); ctx.strokeStyle = cast.hair; ctx.lineWidth = 4; ctx.stroke(); }
   }
   // accessories on head
   const acc = p.acc;
@@ -481,9 +577,11 @@ function drawChar(ctx, pose, prevPose) {
   if (bodyRot) { ctx.translate(0, -150); ctx.rotate(bodyRot); ctx.translate(0, 150); }
   // legs
   if (!p.hideLegs) {
-    for (const [side, leg, k] of [[-1, p.legL, 'L'], [1, p.legR, 'R']]) {
-      const L = g.legs[k]; joint(ctx, L.S, L.E, L.H, 30, o.pants);
-      shoe(ctx, Object.assign({}, L.H, { lift: leg.lift }), side, p, o, cast);
+    const order = ['L', 'R'].sort((a, b) => g.legs[a].z - g.legs[b].z);
+    for (const k of order) {
+      const L = g.legs[k]; const far = Math.abs(g.st) > 0.2 && L.z < 0;
+      shoe(ctx, L, o, cast);
+      joint(ctx, L.S, L.E, L.H, 30, far ? mixC(o.pants, '#0b1222', 0.22) : o.pants, null, 'butt');
     }
   }
   const armList = [[-1, p.armL, g.shL, 'L'], [1, p.armR, g.shR, 'R']];
@@ -497,14 +595,15 @@ function drawChar(ctx, pose, prevPose) {
     if (p.hold[k + 'front']) p.hold[k + 'front'](ctx, hp.x, hp.y, ang, p);
   };
   // arms flagged as behind
-  armList.filter(a => a[1].behind).forEach(drawArm);
-  ctx.save(); ctx.translate(g.hip.x, g.hip.y); ctx.rotate(p.lean); ctx.scale(g.sx, g.sy); torso(ctx, p, o, cast, swing); ctx.restore();
+  const isBehind = a => a[1].behind || (Math.abs(g.st) > 0.3 && g.arms[a[3]].z < 0 && !a[1].front && p.mic !== a[3]);
+  armList.filter(isBehind).forEach(drawArm);
+  ctx.save(); ctx.translate(g.hip.x, g.hip.y); ctx.rotate(p.lean); ctx.scale(g.sx * g.bw, g.sy); torso(ctx, p, o, cast, swing); ctx.restore();
   // arms that go in front of torso but behind head
-  armList.filter(a => !a[1].behind && a[1].underHead).forEach(drawArm);
+  armList.filter(a => !isBehind(a) && a[1].underHead).forEach(drawArm);
   ctx.save(); ctx.translate(g.head.x, g.head.y); ctx.rotate(p.lean + p.headTilt); ctx.scale(1 + p.squash * 0.15, 1 - p.squash * 0.1);
   drawHead(ctx, p, cast, swing);
   ctx.restore();
-  armList.filter(a => !a[1].behind && !a[1].underHead).forEach(drawArm);
+  armList.filter(a => !isBehind(a) && !a[1].underHead).forEach(drawArm);
   if (p.hideLegs && p.cover) p.cover(ctx, p, g);
   // above-head fx (character space)
   const hx = g.head.x, hy = g.head.y;
@@ -541,36 +640,58 @@ function rainCloud(ctx, x, y, a, t) {
 }
 
 // ---------- motion helpers ----------
-function walk(t, speed = 1.6, stride = 34, lift = 22) {
-  const ph = t * speed * Math.PI * 2;
-  const s = Math.sin(ph), c = Math.cos(ph);
-  return {
-    legL: { x: -20 + s * stride, y: -Math.max(0, c) * lift, bend: 1, lift: Math.max(0, c) * lift },
-    legR: { x: 20 - s * stride, y: -Math.max(0, -c) * lift, bend: -1, lift: Math.max(0, -c) * lift },
-    armL: { x: -18 - s * stride * 0.9, y: 96, bend: 1, hand: 'fist' },
-    armR: { x: 18 + s * stride * 0.9, y: 96, bend: -1, hand: 'fist' },
-    crouch: 3 + Math.abs(c) * 7, headTilt: s * 0.03,
-  };
+// Biomechanical gait, driven by DISTANCE travelled over the ground (char units) so planted feet never slide.
+// Walk: stance 62% / swing 38% per foot (double support ~24%): heel strike -> foot flat -> heel off -> toe off;
+//       pelvis lowest at contact ("down"), highest at mid-stance ("passing/up"); arms swing opposite the legs.
+// Run:  stance ~36% with a flight phase, mid-foot landing close under the body, high heel recovery,
+//       forward lean from the ankles (~9°), elbows ~90° swinging front-to-back.
+const smooth = k => k * k * (3 - 2 * k);
+function gait(dist, o = {}) {
+  const run = !!o.run, dir = o.dir || 1;
+  const step = o.step || (run ? 112 : 68);
+  const duty = run ? 0.36 : 0.62;
+  const D = 2 * step, stance = duty * D;
+  const aF = stance * (run ? 0.3 : 0.5), aB = stance - aF;
+  const lift = o.lift || (run ? 58 : 16);
+  const cyc = dist / D;
+  const r = {}; const legX = {};
+  for (const [k, off] of [['legL', 0], ['legR', 0.5]]) {
+    const u = (((cyc + off) % 1) + 1) % 1;
+    let x, y = 0, pitch = 0;
+    if (u < duty) { // stance: foot fixed on the ground, body passes over it
+      const s2 = u / duty; x = lerp(aF, -aB, s2);
+      pitch = run ? (s2 < 0.2 ? 0.1 * (1 - s2 / 0.2) : s2 > 0.42 ? -0.95 * Math.pow((s2 - 0.42) / 0.58, 1.5) : 0)
+                  : (s2 < 0.15 ? 0.3 * (1 - s2 / 0.15) : s2 > 0.55 ? -0.72 * Math.pow((s2 - 0.55) / 0.45, 1.5) : 0);
+    } else { // swing
+      const w = (u - duty) / (1 - duty);
+      x = lerp(-aB, aF, run ? smooth(Math.pow(w, 1.35)) : smooth(w));
+      y = run ? -lift * Math.pow(Math.sin(Math.PI * Math.min(1, w * 1.12)), 1.1) : -lift * Math.pow(Math.sin(Math.PI * w), 0.8);
+      pitch = run ? lerp(-0.95, 0.12, smooth(w)) : lerp(-0.72, 0.3, smooth(w));
+    }
+    r[k] = { x: x * dir, y, pitch };
+    legX[k] = x;
+  }
+  const amp = Math.max(aF, aB);
+  const qL = legX.legR / amp, qR = legX.legL / amp; // each arm swings with the opposite leg
+  const armT = q => run ? { x: dir * (4 + 40 * q), y: 50 - 24 * Math.max(0, q) + 12 * Math.max(0, -q), hand: 'fist', z: 0 }
+                        : { x: dir * (6 + 30 * q), y: 94 - 10 * Math.max(0, q), hand: 'fist', z: 0 };
+  r.armL = armT(qL); r.armR = armT(qR);
+  if (run) { r.crouch = 8 + 9 * Math.cos(4 * Math.PI * (cyc - 0.18)); r.lean = dir * (0.15 + 0.02 * Math.sin(4 * Math.PI * cyc)); }
+  else { r.crouch = 2.5 + 3 * Math.cos(4 * Math.PI * (cyc - 0.02)); r.lean = dir * 0.04; }
+  r.headTilt = -r.lean * 0.55 + Math.sin(4 * Math.PI * cyc) * 0.012;
+  return r;
 }
-function run(t, speed = 2.6, stride = 52) {
-  const ph = t * speed * Math.PI * 2;
-  const s = Math.sin(ph), c = Math.cos(ph);
-  return {
-    legL: { x: -12 + s * stride, y: -Math.max(0, c) * 46, bend: 1 },
-    legR: { x: 12 - s * stride, y: -Math.max(0, -c) * 46, bend: -1 },
-    armL: { x: -14 - s * 36, y: 52 - Math.abs(s) * 14, bend: 1, hand: 'fist' },
-    armR: { x: 14 + s * 36, y: 52 - Math.abs(s) * 14, bend: -1, hand: 'fist' },
-    crouch: 6 + Math.abs(c) * 12, jump: Math.abs(c) * 10, lean: 0.12,
-  };
-}
+const walkPose = (dist, o = {}) => gait(dist, o);
+const runPose = (dist, o = {}) => gait(dist, Object.assign({ run: true }, o));
+
 // Natural gesture presets (hand targets relative to the shoulder; IK bends the elbow anatomically)
 const GEST = {
   wave: (t, side = 1) => ({ x: side * (60 + Math.sin(t * 9) * 16), y: -64, hand: 'open' }),   // upper arm out, forearm up
   pump: (side = 1) => ({ x: side * 42, y: -64, hand: 'fist' }),                               // fist at head height, elbow bent
   scratch: (side = 1) => ({ x: -side * 12, y: -112, hand: 'fist', elbowOut: 1.4 }),             // hand on head, elbow raised outward
 };
-const STAND = () => ({ legL: { x: -30, y: 0, bend: 1 }, legR: { x: 30, y: 0, bend: -1 } });
+const STAND = () => ({ legL: { x: -27, y: 0, bend: 1 }, legR: { x: 27, y: 0, bend: -1 } });
 function idle(t) { return { crouch: Math.sin(t * 2.2) * 2.5, headTilt: Math.sin(t * 1.3) * 0.03, lean: Math.sin(t * 0.9) * 0.015 }; }
 function merge(...objs) { const r = {}; for (const o of objs) if (o) for (const k in o) { if (o[k] && typeof o[k] === 'object' && !Array.isArray(o[k]) && typeof o[k] !== 'function' && r[k] && typeof r[k] === 'object') r[k] = Object.assign({}, r[k], o[k]); else r[k] = o[k]; } return r; }
 
-module.exports = { GEST, drawChar, drawHeadAt, resolve, EXPR, CAST, OUTFIT, walk, run, idle, STAND, merge, bulb, rainCloud, hand };
+module.exports = { _geo: geo, GEST, gait, walkPose, runPose, drawChar, drawHeadAt, resolve, EXPR, CAST, OUTFIT, idle, STAND, merge, bulb, rainCloud, hand };

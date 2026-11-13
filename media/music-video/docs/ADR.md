@@ -67,3 +67,32 @@
 - Arah telapak tangan mengikuti arah lengan bawah (siku → pergelangan).
 
 **Konsekuensi.** Pose yang dulu mengandalkan lengan "melar" disetel ulang: melambai, kepal ke atas, garuk kepala, lari, dan trofi. Lembar uji visual: `tests/arm_sheet.js` (16 pose).
+
+## ADR-006 — Gait biomekanis, model kaki/sepatu, dan rambut baru (v1.2)
+**Status:** Diterima · 13 Nov 2026
+
+**Konteks.** Ada tiga umpan balik:
+- jalan dan lari belum realistis;
+- sepatu tampak terpisah dan sedikit terangkat dari tanah;
+- gaya rambut harus mengikuti gambar referensi (shaggy cokelat).
+
+**Keputusan.**
+1. **Gait digerakkan oleh jarak tempuh**, bukan waktu: `walkPose(dist)` / `runPose(dist)`. Fase langkah dihitung dari jarak yang ditempuh badan di atas tanah, jadi kaki yang menapak bergerak mundur tepat sebesar kecepatan badan. Hasilnya slip 0 px; background yang di-scroll memakai kecepatan yang sama.
+2. **Jalan:** stance 62% / swing 38% per kaki (double support ±24%). Urutannya heel-strike (jari terangkat, berputar di tumit) → foot-flat → heel-off → toe-off (berputar di bola kaki). Pinggul paling rendah saat kontak (*down*) dan paling tinggi saat mid-stance (*passing/up*). Lengan berayun berlawanan dengan kaki, badan condong ±2°.
+3. **Lari:** stance ±36% dengan fase melayang (*float*), mendarat midfoot dekat di bawah badan, tumit naik tinggi saat recovery. Badan condong ±9° dari pergelangan kaki, siku ±90° berayun depan-belakang tanpa menyilang garis tengah. Cadence = tempo lagu, 161,5 langkah/menit.
+4. **Penurunan pinggul otomatis:** kalau kaki yang menapak tidak terjangkau dengan lutut sedikit menekuk, pinggul diturunkan seperlunya. Celah jangkauan tercatat 0 di uji numerik.
+5. **Model kaki:** IK sekarang menargetkan **pergelangan kaki** (18 unit di atas sol). Sepatu adalah bentuk telapak (tumit → bola → jari) yang menempel di pergelangan:
+   - sol rata di tanah;
+   - berputar di tumit atau bola kaki sesuai `pitch`;
+   - bentuknya diinterpolasi dari tampak depan ke tampak samping sesuai arah badan;
+   - ujung celana (hem) menutup kerah sepatu.
+
+   Panjang paha + betis 50 + 48, sehingga lutut lurus saat berdiri.
+6. **Arah badan:** bahu dan pinggul menyempit sesuai `cos θ`, detail hoodie bergeser ke arah hadap, dan kaki/lengan diurutkan menurut kedalaman. Di tampak samping, lengan dan kaki yang jauh digambar di belakang badan, dan celana kaki yang jauh sedikit lebih gelap.
+7. **Tangga:** satu anak tangga per langkah. Tinggi anak tangga diskalakan ke panjang kaki, dan tumit kaki belakang naik sebelum toe-off.
+8. **Rambut `shaggy`** (karakter utama):
+   - cokelat, volume membulat lebih lebar dari wajah;
+   - poni runcing dengan panjang bervariasi sampai garis mata;
+   - helai samping menutup bagian atas telinga;
+   - pita kilau bersudut, sisi bawah lebih gelap;
+   - alis cokelat tua di atas poni.

@@ -33,3 +33,14 @@
 | 16:05 | Lembar uji 16 pose → setel ulang lambai/kepal/garuk/lari/HP; perbaiki kedipan |
 | 16:10 | Render penuh v1.1 (267 s) → audit 10/10 → cek sekuens gerak & penempatan logo |
 | 16:15 | Dokumen ADR-005, riset, audit v1.1; commit & push `feat/music-video` |
+
+## 2026-11-13 (WIB) — v1.2
+| Jam | Kegiatan |
+|---|---|
+| 16:10 | Umpan balik: jalan/lari harus realistis, sepatu & telapak menapak normal, rambut ganti ke gaya referensi |
+| 16:12 | Riset gait: AAPM&R, Cal State, Healthline (float/flight), On (form lari), siklus jalan Monmouth |
+| 16:20 | Model kaki baru: IK ke pergelangan, telapak berputar di tumit/bola, sepatu tampak depan↔samping, hem celana |
+| 16:30 | Gait engine berbasis jarak (jalan 62/38, lari 36/64 + float), lean, ayunan lengan, penurunan pinggul otomatis |
+| 16:40 | Arah badan (bahu/pinggul menyempit, urutan kedalaman), tangga realistis, rambut shaggy cokelat |
+| 16:45 | Uji: gait_sheet, head_cu, gait_check (slip 0, celah 0) → scene jalan/lari diubah ke kecepatan yang cocok |
+| 16:50 | Render penuh v1.2 → audit → commit & push |

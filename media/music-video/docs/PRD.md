@@ -2,7 +2,7 @@
 
 | Item | Nilai |
 |---|---|
-| Versi | 1.1 (13 Nov 2026: gerak tangan anatomis, mic ke mulut, logo resmi) |
+| Versi | 1.2 (13 Nov 2026: gait jalan/lari biomekanis, sepatu menapak, rambut shaggy cokelat; v1.1: tangan anatomis, mic, logo resmi) |
 | Tanggal | 9 Nov 2026 |
 | Pemilik | Boosteryuk (boosteryuk.com) |
 | Status | Selesai v1 (render final + audit) |

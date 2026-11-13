@@ -38,6 +38,15 @@ Implikasi: cut dan aksi karakter dikunci ke grid beat; shot di chorus dibuat leb
 | Forum Unreal Engine — Two Bone IK pole target | Pole target otomatis dihitung dari arah tubuh agar siku tidak berbalik | Pole default dihitung dari `turn`, plus override `elbowOut` |
 | My New Microphone — *How To Hold A Microphone When Singing Live* | Pegang mic di tengah gagang, 1–3 inci (2–8 cm) dari mulut, arahkan sedikit off-axis (antara bibir bawah dan dagu), jangan menutup grille, lengan & bahu rileks | Rig mic: grip tengah, grille di bawah mulut mengarah ke mulut, siku turun santai |
 
+## 6. Referensi jalan & lari (v1.2)
+| Referensi | Fakta | Diterapkan sebagai |
+|---|---|---|
+| AAPM&R — *Biomechanics of Normal Gait* | Stance ±60%, swing ±40%; single support ±40%, double support ±20%; COM bergerak sinusoidal vertikal & lateral | Duty factor jalan 0,62; pinggul naik-turun sinusoidal 2× per siklus |
+| Cal State — *Introduction to Human Gait* | Satu siklus = kontak awal → kontak awal kaki yang sama; event heel strike, foot flat, heel off, toe off | Urutan pitch kaki: tumit → rata → tumit naik → jari |
+| Healthline — *Running Gait* | Lari: stance ±40%, swing ±60% termasuk *float* (kedua kaki di udara); jalan selalu ada satu kaki menapak | Duty factor lari 0,36 + fase melayang |
+| On — *Proper Running Form* | Condong sedikit dari pergelangan kaki, mendarat di bawah badan, siku ±90° berayun depan-belakang tanpa menyilang garis tengah, cadence 170–180 spm | Lean 0,15 rad, landing 30% di depan / 70% di belakang, cadence 161,5 spm (tempo lagu) |
+| Monmouth Univ. — *Movement: Walk Cycle* | Pose kunci contact → down → passing → push-off; 2 langkah per siklus | Pose dihasilkan prosedural mengikuti urutan itu (lihat `tests/gait_sheet.js`) |
+
 ## Sumber
 - Netflix Partner Help — Timed Text Style Guide: General Requirements: https://backlothelp.netflix.com/hc/en-us/articles/215758617
 - Netflix Partner Help — Indonesian Timed Text Style Guide: https://backlothelp.netflix.com/hc/en-us/articles/216009727
@@ -51,3 +60,8 @@ Implikasi: cut dan aksi karakter dikunci ke grid beat; shot di chorus dibuat leb
 - UCLA DMA — Maya IK course notes: https://users.dma.ucla.edu/~cariesta/MayaCourseNotes/html/ik.html
 - Unreal Engine Forums — Automatically compute the Two Bone IK pole vector: https://forums.unrealengine.com/t/automatically-compute-the-two-bone-ik-pole-vector-joint-target/148105
 - My New Microphone — How To Hold A Microphone When Singing Live: https://mynewmicrophone.com/hold-microphone-singing-live/
+- AAPM&R — Biomechanics of Normal Gait: https://now.aapmr.org/biomechanics-normal-gait/
+- Cal State Pressbooks — Introduction to Human Gait: https://pressbooks.calstate.edu/humanneuromechanics/?p=48
+- Healthline — Running Gait: https://www.healthline.com/health/fitness/running-gait
+- On — Proper Running Form: https://www.on.com/en-id/stories/proper-running-form
+- Monmouth University — Movement: Walk Cycle: https://animation.monmouth.edu/instruct/?p=351
