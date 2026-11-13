@@ -89,8 +89,13 @@ child_panel_domains
 - Halaman admin "Child Panel": daftar panel, form konfigurasi, input nama subdomain (validasi
   `^[a-z0-9-]{1,32}$` + daftar nama terlarang `RESERVED_SUBDOMAINS`).
 
-## Keputusan yang menunggu konfirmasi
-1. Hasil `/__child/health` di domain asli (menentukan rencana A atau B).
-2. Perlu atau tidak membuat DNS record per subdomain lewat API Cloudflare (wildcard sudah cukup).
-   Bila ya: butuh API Token Cloudflare (izin `Zone → DNS → Edit` khusus zona boosteryuk.com),
-   disimpan sebagai secret Worker `CF_API_TOKEN` — tidak pernah di repo.
+## Keputusan
+1. **Subdomain cukup didaftarkan di database** (tabel `child_panel_domains`), tanpa membuat DNS
+   record per subdomain lewat API Cloudflare — wildcard `*.boosteryuk.com` sudah mengarahkan
+   semua subdomain ke Worker. Tidak perlu API token Cloudflare. (Dikonfirmasi pemilik, 13 Nov 2026.)
+2. Menunggu: hasil `/__child/health` di domain asli (menentukan rencana A atau B).
+
+## Dampak route ke domain lain
+- `boosteryuk.com` (apex) **tidak** cocok dengan pola `*.boosteryuk.com/*` → web utama tidak melewati Worker.
+- `www`, `wa-origin`, `mail`, dll **melewati** Worker lalu diteruskan apa adanya (`fetch(request)`), termasuk
+  POST dan WebSocket. Efeknya hanya menambah hitungan kuota request Worker (gratis 100.000/hari).
