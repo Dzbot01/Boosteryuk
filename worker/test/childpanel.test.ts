@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import worker from "../index";
-import { classifyHost, isChallengeHtml, routeByHost } from "../childpanel/proxy";
+import { classifyHost, isChallengeHtml, rewriteHostsInHtml, routeByHost } from "../childpanel/proxy";
 
 const ctx = { waitUntil() {}, passThroughOnException() {} };
 afterEach(() => vi.unstubAllGlobals());
@@ -38,7 +38,34 @@ describe("isChallengeHtml", () => {
   });
 });
 
+describe("rewriteHostsInHtml", () => {
+  it("keeps the AeonFree challenge redirect on the child host", () => {
+    const page = '<script>document.cookie="__test=x; path=/"; location.href="https://boosteryuk.com/?i=1";</script>';
+    expect(rewriteHostsInHtml(page, "boosteryuk.com", "tes1.boosteryuk.com")).toContain('location.href="https://tes1.boosteryuk.com/?i=1"');
+  });
+  it("rewrites escaped and www URLs but not other subdomains", () => {
+    const html = '<a href="http://www.boosteryuk.com/x">a</a> "https:\\/\\/boosteryuk.com\\/y" https://api.boosteryuk.com/z https://boosteryuk.com';
+    const out = rewriteHostsInHtml(html, "boosteryuk.com", "t.boosteryuk.com");
+    expect(out).toContain('href="https://t.boosteryuk.com/x"');
+    expect(out).toContain('"https:\\/\\/t.boosteryuk.com\\/y"');
+    expect(out).toContain("https://api.boosteryuk.com/z");
+    expect(out.endsWith("https://t.boosteryuk.com")).toBe(true);
+  });
+});
+
 describe("routeByHost", () => {
+  it("rewrites the challenge page served through the proxy", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      '<html><script src="/aes.js"></script><script>location.href="https://boosteryuk.com/?i=1";</script></html>',
+      { headers: { "content-type": "text/html; charset=UTF-8", "content-length": "120" } })));
+    const res = (await routeByHost(new Request("https://tes1.boosteryuk.com/"), {}, ctx))!;
+    const body = await res.text();
+    expect(body).toContain('location.href="https://tes1.boosteryuk.com/?i=1"');
+    expect(body).not.toContain('"https://boosteryuk.com');
+    expect(res.headers.get("content-length")).toBeNull();
+  });
+
+
   it("returns null for the worker's own API host (old endpoints untouched)", async () => {
     const f = vi.fn();
     vi.stubGlobal("fetch", f);
