@@ -92,7 +92,7 @@ describe("routeByHost", () => {
     }));
     const req = new Request("https://toko1.boosteryuk.com/api/login.php?x=1", {
       method: "POST",
-      headers: { "content-type": "application/json", cookie: "__test=abc", "cf-connecting-ip": "1.2.3.4" },
+      headers: { "content-type": "application/json", cookie: "__test=abc", "cf-connecting-ip": "1.2.3.4", "x-forwarded-host": "toko1.boosteryuk.com", forwarded: "host=toko1.boosteryuk.com" },
       body: '{"email":"a"}',
     });
     const res = (await routeByHost(req, {}, ctx))!;
@@ -100,8 +100,10 @@ describe("routeByHost", () => {
     expect(seen!.method).toBe("POST");
     expect(await seen!.text()).toBe('{"email":"a"}');
     expect(seen!.headers.get("x-child-panel")).toBe("toko1");
-    expect(seen!.headers.get("x-forwarded-host")).toBe("toko1.boosteryuk.com");
-    expect(seen!.headers.get("x-forwarded-for")).toBe("1.2.3.4");
+    // iFastNet memilih domain dari X-Forwarded-Host -> tidak boleh dikirim (penyebab "Domain Suspended")
+    expect(seen!.headers.get("x-forwarded-host")).toBeNull();
+    expect(seen!.headers.get("x-forwarded-for")).toBeNull();
+    expect(seen!.headers.get("x-child-client-ip")).toBe("1.2.3.4");
     expect(seen!.headers.get("cookie")).toBe("__test=abc");
     expect(seen!.redirect).toBe("manual");
     expect(res.status).toBe(302);
@@ -117,6 +119,28 @@ describe("routeByHost", () => {
     const j: any = await res.json();
     expect(j.ok).toBe(false);
     expect(j.probes["/"].challenge).toBe(true);
+  });
+
+  it("never forwards visitors to the hosting's suspended page", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 302, headers: { location: "https://suspended-domain.net/" } })));
+    const res = (await routeByHost(new Request("https://tes1.boosteryuk.com/"), {}, ctx))!;
+    expect(res.status).toBe(502);
+    expect(res.headers.get("location")).toBeNull();
+    expect(res.headers.get("x-child-error")).toContain("suspended-domain.net");
+  });
+
+  it("health flags a foreign redirect and probes with the real proxy headers", async () => {
+    const seen: Request[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (r: Request) => {
+      seen.push(r);
+      return new Response(null, { status: 302, headers: { location: "https://suspended-domain.net/" } });
+    }));
+    const res = (await routeByHost(new Request("https://tes1.boosteryuk.com/__child/health", { headers: { "x-forwarded-host": "x" } }), {}, ctx))!;
+    const j: any = await res.json();
+    expect(j.ok).toBe(false);
+    expect(j.probes["/"].foreignRedirect).toBe("suspended-domain.net");
+    expect(seen[0].headers.get("x-forwarded-host")).toBeNull();
+    expect(seen[0].headers.get("x-child-panel")).toBe("tes1");
   });
 
   it("returns a friendly 502 when the origin is unreachable", async () => {
