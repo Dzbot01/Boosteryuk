@@ -1,7 +1,7 @@
 'use strict';
 // Core engine: canvas constants, fonts, easing, keyframes, beat sync, drawing helpers, icons.
 const path = require('path');
-const { createCanvas, GlobalFonts } = require('@napi-rs/canvas');
+const { createCanvas, GlobalFonts, loadImage } = require('@napi-rs/canvas');
 
 const W = 1920, H = 1080, FPS = 30;
 const ROOT = path.join(__dirname, '..');
@@ -188,7 +188,15 @@ function camera(ctx, { zoom = 1, x = W / 2, y = H / 2, rot = 0, shake = 0, t = 0
   ctx.translate(W / 2 + sx, H / 2 + sy); ctx.rotate(rot); ctx.scale(zoom, zoom); ctx.translate(-x, -y);
 }
 
+// Image assets (async load once before drawing)
+const ASSETS = {};
+async function loadAssets() {
+  if (!ASSETS.logo) ASSETS.logo = await loadImage(path.join(ROOT, 'assets', 'logo', 'boosteryuk-logo.png'));
+  return ASSETS;
+}
+
 module.exports = {
+  ASSETS, loadAssets,
   W, H, FPS, P, BEATS, beats, BEAT_LEN, createCanvas,
   clamp, lerp, E, prog, K, mulberry32, hash, noise,
   beat, beatIdx, snapBeat, voc, rms,

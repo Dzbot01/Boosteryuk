@@ -6,7 +6,7 @@ PASS | Duration = song (±0.05 s) | container 233.733 s, video 233.733, audio 23
 PASS | Shot frames sum | 77 shots
 PASS | Subtitle cues ordered, ≤2 lines | 35 cues
 PASS | Subtitle ≤42 chars/line | longest line 41 chars
-PASS | No black segments except intended fade | start:233.5 black_end:233.7 black_duration:0.2
+PASS | No black segments except intended fade | start:233.533 black_end:233.7 black_duration:0.166667
 PASS | No sustained white frames (>0.15 s) | none
 
 10/10 checks passed

@@ -11,8 +11,8 @@ const add = (at, name, draw, o = {}) => S.push(Object.assign({ at, name, draw },
 add(92.3, 'logo-hero', (ctx, lt, T) => {
   const b = beat(T); B.brandBg(ctx, T, { pulse: b.pulse });
   const s = lt < 0.35 ? lerp(2.6, 1, E.out(lt / 0.35)) : 1 + b.pulse * 0.015;
-  ctx.save(); ctx.translate(W / 2, 400); ctx.scale(s, s); U.logo(ctx, 0, 0, 190, { glowA: 1, pill: true, alpha: clamp(lt / 0.2) }); ctx.restore();
-  U.chip(ctx, W / 2, 560, 'SMM Panel  •  Hosting & VPS', { size: 36, alpha: prog(lt, 0.6, 0.9) });
+  ctx.save(); ctx.translate(W / 2, 330); ctx.scale(s, s); U.logo(ctx, 0, 0, 170, { glowA: 1, alpha: clamp(lt / 0.2) }); ctx.restore();
+  U.chip(ctx, W / 2, 600, 'SMM Panel  •  Hosting & VPS', { size: 36, alpha: prog(lt, 0.6, 0.9) });
   act(ctx, l => ({ x: 960, y: 1080 + 420 - E.back(clamp((l - 0.7) / 0.5)) * 300, s: 1.3, t: T + (l - lt), expr: 'grin', armL: { x: -110, y: -50, bend: 1, hand: 'open' }, armR: { x: 110, y: -50, bend: -1, hand: 'open' }, fx: { sparkle: 0.6 } }), lt);
   flash(ctx, lt, 0.25, 0.7);
 }, { trans: 'zoom' });
@@ -53,7 +53,7 @@ add(104.8, 'dart', (ctx, lt, T) => {
 add(108.2, 'cheer', (ctx, lt, T) => {
   B.brandBg(ctx, T, { pulse: beat(T).pulse });
   B.confetti(ctx, T, 108.2, { burst: true, y0: 1100, n: 80, seed: 8 });
-  act(ctx, l => Object.assign(cu(960, 430, 1.8), { t: T + (l - lt), expr: 'joy', armR: { x: 30, y: -110 + Math.sin(l * 14) * 10, bend: -1, hand: 'fist' }, armL: { x: -40, y: 30, bend: 1, hand: 'fist' }, crouch: -Math.abs(Math.sin(l * 7)) * 10, fx: { sparkle: 1 } }), lt);
+  act(ctx, l => Object.assign(cu(960, 430, 1.8), { t: T + (l - lt), expr: 'joy', armR: { x: 42, y: -66 + Math.sin(l * 14) * 8, bend: -1, hand: 'fist' }, armL: { x: -40, y: 30, bend: 1, hand: 'fist' }, crouch: -Math.abs(Math.sin(l * 7)) * 10, fx: { sparkle: 1 } }), lt);
 });
 // S36 notifications pop
 add(110.1, 'notifs', (ctx, lt, T) => {
@@ -176,18 +176,18 @@ add(150.4, 'buildup', (ctx, lt, T) => {
 });
 
 // ===== CHORUS 2 – stage =====
-const ledLogo = T => (c, x, y, w, h) => { B.brandBg(c, T, { cx: x + w / 2, cy: y + h / 2 }); U.logo(c, x + w / 2, y + h / 2, 110 * (1 + beat(T).pulse * 0.05), { glowA: 1 }); };
+const ledLogo = T => (c, x, y, w, h) => { B.brandBg(c, T, { cx: x + w / 2, cy: y + h / 2 }); U.logo(c, x + w / 2, y + h * 0.4, 100 * (1 + beat(T).pulse * 0.05), { glowA: 1 }); };
 add(151.9, 'stage-jump', (ctx, lt, T) => {
   ctx.save(); camera(ctx, { zoom: 1.0, shake: lt < 0.7 ? 0 : (1 - clamp((lt - 0.7) / 0.4)) * 14, t: T });
   B.stage(ctx, T, { screen: ledLogo(T) });
-  act(ctx, l => { const jj = l < 0.7 ? Math.sin((l / 0.7) * Math.PI) : 0; return { x: lerp(500, 960, clamp(l / 0.7)), y: 900, s: 1.2, t: T + (l - lt), expr: l < 0.7 ? 'laugh' : 'fierce', jump: jj * 260, squash: l > 0.7 && l < 0.85 ? -0.12 : 0, armR: { x: 30, y: -40, bend: -1, hand: 'hold' }, armL: { x: -90, y: -90, bend: 1, hand: 'open' }, hold: { R: (c, x, y) => U.micAt(c, x, y, -0.3) } }; }, lt);
+  act(ctx, l => { const jj = l < 0.7 ? Math.sin((l / 0.7) * Math.PI) : 0; return { x: lerp(500, 960, clamp(l / 0.7)), y: 900, s: 1.2, t: T + (l - lt), expr: l < 0.7 ? 'laugh' : 'fierce', jump: jj * 260, squash: l > 0.7 && l < 0.85 ? -0.12 : 0, mic: 'R', talk: l > 0.7 ? clamp(voc(T + l - lt) * 1.3) : 0, armL: { x: -90, y: -90, bend: 1, hand: 'open' } }; }, lt);
   B.crowd(ctx, T, { y0: 1120 });
   ctx.restore(); flash(ctx, lt, 0.2, 0.8);
 }, { trans: 'zoom' });
 add(154.5, 'stage-sing', (ctx, lt, T) => {
   ctx.save(); camera(ctx, { zoom: 1.4, x: 960, y: 610 });
   B.stage(ctx, T, { screen: ledLogo(T) });
-  act(ctx, l => { const bb = beat(T + l - lt); return { x: 960, y: 900, s: 1.2, t: T + (l - lt), expr: 'happy', talk: clamp(voc(T + l - lt) * 1.3), crouch: Math.sin(bb.phase * Math.PI) * 14, headTilt: (bb.i % 2 ? 1 : -1) * 0.08, armR: { x: -20, y: -50, bend: -1, hand: 'hold' }, armL: { x: -100, y: -60 + Math.sin(bb.phase * Math.PI) * -30, bend: 1, hand: 'open' }, hold: { R: (c, x, y) => U.micAt(c, x, y, -0.6) } }; }, lt);
+  act(ctx, l => { const bb = beat(T + l - lt); return { x: 960, y: 900, s: 1.2, t: T + (l - lt), expr: 'happy', talk: clamp(voc(T + l - lt) * 1.3), crouch: Math.sin(bb.phase * Math.PI) * 14, headTilt: (bb.i % 2 ? 1 : -1) * 0.08, mic: 'R', armL: { x: -100, y: -60 + Math.sin(bb.phase * Math.PI) * -30, bend: 1, hand: 'open' } }; }, lt);
   ctx.restore();
   B.crowd(ctx, T, { y0: 1160 });
 });
@@ -320,23 +320,23 @@ add(213.4, 'wave-counters', (ctx, lt, T) => {
   U.toast(ctx, 1500, 300, '128K views', { icon: 'eye', col: P.orange, s: E.back(clamp((lt - 0.6) / 0.3)) });
   U.toast(ctx, 420, 680, '24K likes', { icon: 'heart', col: P.red, s: E.back(clamp((lt - 1.0) / 0.3)) });
   U.toast(ctx, 1500, 680, '1,2K komentar', { icon: 'comment', col: P.purple, s: E.back(clamp((lt - 1.4) / 0.3)) });
-  act(ctx, l => ({ x: 960, y: 1000, s: lerp(1.5, 1.25, E.inOut(clamp(l / 4.4))), t: T + (l - lt), expr: 'grin', armR: { x: 70 + Math.sin(l * 9) * 26, y: -100, bend: -1, hand: 'open' }, ...holdPhone(), look: [0, -0.2], headTilt: 0 }), lt);
+  act(ctx, l => ({ x: 960, y: 1000, s: lerp(1.5, 1.25, E.inOut(clamp(l / 4.4))), t: T + (l - lt), expr: 'grin', armR: C.GEST.wave(l), ...holdPhone(), look: [0, -0.2], headTilt: 0 }), lt);
 });
 add(217.84, 'logo-slam', (ctx, lt, T) => {
   const b = beat(T); B.brandBg(ctx, T, { pulse: b.pulse * 1.5 });
   B.fireworks(ctx, T, [[218.0, 300, 260, P.cyan], [218.6, 1620, 240, P.pink], [219.8, 500, 200, P.yellow], [221.6, 1450, 260, P.cyan], [222.4, 380, 260, P.purple], [223.2, 1560, 220, P.yellow]]);
   const slams = [0, 3.6]; let s = 1; for (const t0 of slams) { const k = lt - t0; if (k >= 0 && k < 0.35) s = lerp(2.2, 1, E.out(k / 0.35)); }
-  ctx.save(); ctx.translate(W / 2, 380); ctx.scale(s * (1 + b.pulse * 0.02), s * (1 + b.pulse * 0.02)); U.logo(ctx, 0, 0, 200, { glowA: 1.2, pill: true }); ctx.restore();
+  ctx.save(); ctx.translate(W / 2, 340); ctx.scale(s * (1 + b.pulse * 0.02), s * (1 + b.pulse * 0.02)); U.logo(ctx, 0, 0, 190, { glowA: 1.2 }); ctx.restore();
   act(ctx, l => { const bb = beat(T + l - lt); const jj = Math.sin(bb.phase * Math.PI); return { x: 960, y: 1050, s: 1.2, t: T + (l - lt), expr: 'laugh', jump: jj * 70, armL: { x: -60, y: -110, bend: 1, hand: 'open' }, armR: { x: 60, y: -110, bend: -1, hand: 'open' } }; }, lt);
   flash(ctx, lt, 0.2, 0.8); flash(ctx, lt - 3.6, 0.2, 0.8);
 }, { trans: 'zoom' });
 add(225.0, 'end-card', (ctx, lt, T) => {
   B.brandBg(ctx, T, { rays: 0.6 });
-  U.logo(ctx, 820, 400, 170, { glowA: 1, pill: true, alpha: prog(lt, 0, 0.4) });
-  text(ctx, 'Booster Media Sosial Tercepat & Terpercaya', 820, 520, { size: 40, font: 'PJS700', color: '#e2e8f0', alpha: prog(lt, 0.3, 0.7) });
-  text(ctx, 'boosteryuk.com', 820, 620, { size: 72, font: 'PJS800', color: P.cyan, alpha: prog(lt, 0.6, 1.0) });
+  U.logo(ctx, 820, 320, 150, { glowA: 1, alpha: prog(lt, 0, 0.4) });
+  text(ctx, 'Booster Media Sosial Tercepat & Terpercaya', 820, 535, { size: 40, font: 'PJS700', color: '#e2e8f0', alpha: prog(lt, 0.3, 0.7) });
+  text(ctx, 'boosteryuk.com', 820, 630, { size: 72, font: 'PJS800', color: P.cyan, alpha: prog(lt, 0.6, 1.0) });
   ['SMM Panel', 'Hosting & VPS', 'Support 24/7'].forEach((l, i) => U.chip(ctx, 520 + i * 300, 760, l, { size: 32, alpha: prog(lt, 1.0 + i * 0.25, 1.3 + i * 0.25) }));
-  act(ctx, l => ({ x: 1560, y: 1000, s: 1.2, t: T + (l - lt), turn: -0.3, expr: 'happy', armR: { x: 70 + Math.sin(l * 8) * 24, y: -100, bend: -1, hand: 'open' }, armL: { x: -16, y: 96, bend: 1 } }), lt);
+  act(ctx, l => ({ x: 1560, y: 1000, s: 1.2, t: T + (l - lt), turn: -0.3, expr: 'happy', armR: C.GEST.wave(l), armL: { x: -16, y: 96, bend: 1 } }), lt);
   const out = prog(lt, 7.0, 8.6); if (out > 0) { ctx.fillStyle = `rgba(0,0,0,${out})`; ctx.fillRect(0, 0, W, H); }
 });
 

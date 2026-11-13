@@ -17,8 +17,8 @@ add(0.0, 'dawn-title', (ctx, lt, T) => {
   B.sky(ctx, -100, -100, W + 200, H + 300, tod, T, { cloudSpeed: 10 }); B.city(ctx, T, { y0: 900, tod, layers: 2, lights: 0.8 });
   ctx.restore();
   const a = Math.min(prog(lt, 0.5, 1.1, 'out'), 1 - prog(lt, 2.9, 3.35));
-  U.logo(ctx, W / 2, 470, 150, { alpha: a, glowA: a, pill: true });
-  text(ctx, 'OFFICIAL MUSIC VIDEO', W / 2, 590, { size: 34, color: '#e0f2fe', font: 'PJS800', alpha: a, spacing: 8 });
+  U.logo(ctx, W / 2, 420, 140, { alpha: a, glowA: a });
+  text(ctx, 'OFFICIAL MUSIC VIDEO', W / 2, 640, { size: 34, color: '#e0f2fe', font: 'PJS800', alpha: a, spacing: 8 });
   flash(ctx, lt, 0.6, 1, '#000');
 });
 
@@ -62,7 +62,7 @@ add(9.4, 'grab-phone', (ctx, lt, T) => {
   act(ctx, l => ({
     x: 1150, y: 860, s: 1, t: T + (l - lt), outfit: 'pajama', hideLegs: true, lean: 0.06, crouch: 6, headTilt: 0.08 - up * 0.04,
     armL: { x: lerp(-20, 40, up), y: lerp(96, 84, up), bend: 1, hand: 'hold' }, armR: { x: lerp(20, -40, up), y: lerp(96, 86, up), bend: -1, hand: 'hold' },
-    hold: { L: (c, x, y) => U.phone(c, x + 40, y - 30, 72, 128, 0, { back: true }) },
+    hold: { L: (c, x, y) => U.phone(c, x + 40, y - 26, 60, 108, 0, { back: true }) },
     expr: lt < 0.8 ? 'sleepy' : ['sleepy', 'oh', prog(lt, 0.8, 1.1)], look: [0, 0.6], swingAdd: 0.25,
   }), lt);
   B.blanket(ctx, 960, 1700, 735, T, { dim: 0.25 });
@@ -90,7 +90,7 @@ add(14.5, 'fist-pump', (ctx, lt, T) => {
   ctx.save(); ctx.globalAlpha = 0.25; ctx.fillStyle = '#fff7d6'; ctx.beginPath(); ctx.moveTo(300, 560); ctx.lineTo(560, 560); ctx.lineTo(1000, 1080); ctx.lineTo(600, 1080); ctx.closePath(); ctx.fill(); ctx.restore();
   const pump = E.back(clamp((lt - 0.25) / 0.35));
   act(ctx, l => merge({ x: 760, y: 930, s: 1.05, t: T + (l - lt), outfit: 'pajama', expr: lt < 0.3 ? 'calm' : 'determined', crouch: lerp(10, -6, pump) + Math.sin(l * 9) * 1.5, squash: pump * 0.05, headTilt: -0.05 * pump, lean: -0.04 * pump,
-    armR: { x: lerp(20, 34, pump), y: lerp(96, -104, pump), bend: -1, hand: 'fist' }, armL: { x: lerp(-16, 20, pump), y: lerp(96, 50, pump), bend: 1, hand: 'fist' }, fx: { sparkle: pump } }), lt);
+    armR: { x: lerp(20, 44, pump), y: lerp(96, -66, pump), bend: -1, hand: 'fist' }, armL: { x: lerp(-16, 12, pump), y: lerp(96, 70, pump), bend: 1, hand: 'fist' }, fx: { sparkle: pump } }), lt);
   ctx.restore();
 });
 
@@ -218,7 +218,7 @@ add(40.5, 'confused', (ctx, lt, T) => {
   B.deskRoom(ctx, T, { tod: 0.86, dim: 0.55, blue: 1 });
   scribbles(ctx, T, prog(lt, 0, 0.5));
   act(ctx, l => ({ x: 960, y: 950, s: 1.2, t: T + (l - lt), expr: 'confused', look: [Math.sin(l * 2), -0.3], headTilt: Math.sin(l * 2) * 0.12, fx: { q: prog(lt, 0.2, 0.6), sweat: 0.8 },
-    armR: { x: -6 + Math.sin(l * 18) * 6, y: -126, bend: -1, hand: 'fist' }, armL: { x: -16, y: 96, bend: 1 } }), lt);
+    armR: { x: -12 + Math.sin(l * 18) * 5, y: -112, bend: -1, hand: 'fist', elbowOut: 1.4 }, armL: { x: -16, y: 96, bend: 1 } }), lt);
   ctx.restore();
 });
 // S15a refresh, nothing
@@ -256,7 +256,7 @@ add(48.6, 'remember', (ctx, lt, T) => {
   act(ctx, l => ({ x: 760, y: 960, s: 1.2, t: T + (l - lt), expr: 'excited', jump: lt < 0.6 ? Math.sin(clamp(l / 0.6) * Math.PI) * 110 : 0, squash: lt < 0.6 ? 0.1 : 0,
     armL: { x: -16, y: 90, bend: 1, hand: 'fist' }, armR: { x: 70, y: -100, bend: -1, hand: 'point' }, look: [0.8, -1], fx: { sparkle: 1 } }), lt);
   U.bubble(ctx, 1320, 300, 760, 360, 930, 560, { k: prog(lt, 0.3, 1.0), fill: '#0b1222', content: c => {
-    B.brandBg(c, T, { cx: 0, cy: 0 }); U.logo(c, 0, -20, 120, { glowA: 1, pill: true }); text(c, 'Booster media sosial tercepat', 0, 90, { size: 38, color: '#e2e8f0', font: 'PJS700' });
+    B.brandBg(c, T, { cx: 0, cy: 0 }); U.logo(c, 0, -40, 112, { glowA: 1 }); text(c, 'Booster media sosial tercepat', 0, 118, { size: 38, color: '#e2e8f0', font: 'PJS700' });
   } });
   ctx.restore();
 });
@@ -265,7 +265,7 @@ add(51.6, 'brand-card', (ctx, lt, T) => {
   const b = beat(T);
   B.brandBg(ctx, T, { pulse: b.pulse });
   const s = E.back(clamp(lt / 0.4));
-  ctx.save(); ctx.translate(1080, 430); ctx.scale(s, s); U.logo(ctx, 0, 0, 170 * (1 + b.pulse * 0.02), { glowA: 1, pill: true, tagline: 'Platform booster media sosial tercepat' }); ctx.restore();
+  ctx.save(); ctx.translate(1080, 430); ctx.scale(s, s); U.logo(ctx, 0, -20, 165 * (1 + b.pulse * 0.02), { glowA: 1, tagline: 'Platform booster media sosial tercepat' }); ctx.restore();
   act(ctx, l => ({ x: 380, y: 1080 + lerp(300, 0, E.back(clamp(l / 0.5))), s: 1.5, t: T + (l - lt), expr: 'grin', turn: 0.4, armR: { x: 120, y: -60, bend: -1, hand: 'point' }, armL: { x: -30, y: 80, bend: 1, hand: 'thumb' }, crouch: Math.sin(b.phase * Math.PI) * 6 }), lt);
 });
 // S18 boosteryuk.com on phone
@@ -320,7 +320,7 @@ add(67.9, 'rocket-ride', (ctx, lt, T) => {
   const wob = Math.sin(T * 3) * 0.05; const ry = 560 + Math.sin(T * 4) * 16;
   ctx.save(); ctx.translate(960, ry); ctx.rotate(wob); ctx.translate(-960, -ry);
   U.rocket(ctx, 960, ry + 120, 0.85, T, { flame: 1.4 });
-  act(ctx, l => ({ x: 960, y: ry - 10, s: 0.85, t: T + (l - lt), expr: 'laugh', crouch: 52, legL: { x: -88, y: -10, bend: -1 }, legR: { x: 88, y: -10, bend: 1 }, armL: { x: -50, y: 60, bend: 1, hand: 'fist' }, armR: { x: 60 + Math.sin(l * 12) * 20, y: -100, bend: -1, hand: 'open' }, swingAdd: 0.6, shadow: 0 }), lt);
+  act(ctx, l => ({ x: 960, y: ry - 10, s: 0.85, t: T + (l - lt), expr: 'laugh', crouch: 52, legL: { x: -88, y: -10, bend: -1 }, legR: { x: 88, y: -10, bend: 1 }, armL: { x: -50, y: 60, bend: 1, hand: 'fist' }, armR: C.GEST.wave(l * 1.3), swingAdd: 0.6, shadow: 0 }), lt);
   ctx.restore();
   flash(ctx, lt, 0.2, 0.8);
 }, { trans: 'zoom' });
@@ -367,7 +367,7 @@ add(85.5, 'grow-tree', (ctx, lt, T) => {
 add(90.0, 'dance-spin', (ctx, lt, T) => {
   const b = beat(T);
   B.brandBg(ctx, T, { pulse: b.pulse });
-  U.logo(ctx, W / 2, 180, 90, { glowA: 0.6 });
+  U.logo(ctx, W / 2, 190, 95, { glowA: 0.6 });
   act(ctx, l => { const s2 = clamp((l - 0.3) / 1.2); const a = s2 * Math.PI * 2; const bb = beat(T + l - lt); return { x: 960, y: 1000, s: 1.5, t: T + (l - lt), turn: Math.sin(a), flip: Math.cos(a) < 0 ? -1 : 1, expr: 'laugh', armL: { x: -110, y: -40 - bb.pulse * 30, bend: 1, hand: 'open' }, armR: { x: 110, y: -40 - bb.pulse * 30, bend: -1, hand: 'open' }, crouch: Math.sin(bb.phase * Math.PI) * 12, swingAdd: 0.4 }; }, lt);
 });
 

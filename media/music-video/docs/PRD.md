@@ -2,7 +2,7 @@
 
 | Item | Nilai |
 |---|---|
-| Versi | 1.0 |
+| Versi | 1.1 (13 Nov 2026: gerak tangan anatomis, mic ke mulut, logo resmi) |
 | Tanggal | 9 Nov 2026 |
 | Pemilik | Boosteryuk (boosteryuk.com) |
 | Status | Selesai v1 (render final + audit) |
@@ -34,12 +34,12 @@ Kreator konten pemula–menengah dan pelaku UMKM/toko online di Indonesia (18–
 ## 4. Kebutuhan non-fungsional
 - **Spesifikasi output:** 1920×1080, 30 fps CFR, H.264 (CRF 18, yuv420p), AAC 192 kbps, MP4 faststart.
 - **Reproducible:** seluruh video dibangun dari kode (satu perintah `node src/make.js`), tanpa aset berlisensi pihak ketiga.
-- **Brand-safe:** tidak memakai logo platform pihak ketiga (TikTok/Instagram/dll.) sebagai gambar; nama platform hanya teks. Tidak ada klaim angka yang tidak berasal dari Boosteryuk sendiri.
+- **Brand-safe:** di luar logo resmi Boosteryuk (yang memuat ikon platform dan dipakai apa adanya), tidak ada logo platform pihak ketiga yang digambar sendiri; nama platform hanya teks. Tidak ada klaim angka yang tidak berasal dari Boosteryuk sendiri.
 - **Keterbacaan subtitle:** ≤ 42 karakter/baris, ≤ 2 baris, kontras tinggi (outline + latar semi-transparan).
 
 ## 5. Spesifikasi brand (dari repo `Dzbot01/boosteryuk.com`)
 - Warna utama: cyan `#22d3ee` / `#06b6d4` / `#0891b2`, navy `#0f172a`.
-- Wordmark: **Booster** (cyan) + **yuk** (putih), font tebal sans.
+- **Logo resmi** (v1.1): `assets/logo/boosteryuk-logo.png` (PNG transparan dari pemilik brand, sama dengan `LOGO_URL` di situs). Dipakai di semua kemunculan logo; wordmark teks hanya cadangan jika gambar gagal dimuat.
 - Font: Plus Jakarta Sans (teks), Bricolage Grotesque (display).
 - Klaim yang dipakai (sumber: og-image situs): "SMM Panel", "698+ Layanan", "★ 4,9", "Support 24/7", "Booster Media Sosial Terpercaya".
 

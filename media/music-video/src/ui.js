@@ -1,11 +1,25 @@
 'use strict';
 // Brand wordmark, phone/laptop UIs, cards, stamps and story props.
-const { W, H, P, clamp, lerp, E, rgba, mixC, rr, ell, circ, fs, line, glow, text, tw, heartPath, starPath, sparkle, ICON, beat, mulberry32, hash } = require('./engine');
+const { W, H, P, clamp, lerp, E, rgba, mixC, rr, ell, circ, fs, line, glow, text, tw, heartPath, starPath, sparkle, ICON, beat, mulberry32, hash, ASSETS } = require('./engine');
 const { drawHeadAt } = require('./character');
 const OUT = P.out;
 
 // ---------- brand ----------
+// Official Boosteryuk logo (assets/logo/boosteryuk-logo.png, 964x498 after trim).
+// `size` keeps the old wordmark scale: drawn width = 4.3 * size, centred on (x, y).
 function logo(ctx, x, y, size, o = {}) {
+  const img = ASSETS.logo; if (!img) return wordmark(ctx, x, y, size, o);
+  const { alpha = 1, glowA = 0, tagline = null, align = 'center' } = o;
+  const w = size * 4.3, h = w * img.height / img.width;
+  const x0 = align === 'center' ? x - w / 2 : align === 'right' ? x - w : x;
+  ctx.save(); ctx.globalAlpha *= alpha;
+  if (glowA > 0) glow(ctx, x0 + w / 2, y + h * 0.1, w * 0.62, P.cyan, 0.32 * glowA);
+  ctx.drawImage(img, x0, y - h / 2, w, h);
+  if (tagline) text(ctx, tagline, x0 + w / 2, y + h / 2 + size * 0.22, { size: size * 0.24, color: '#e2e8f0', font: 'PJS700' });
+  ctx.restore();
+  return w;
+}
+function wordmark(ctx, x, y, size, o = {}) {
   const { alpha = 1, glowA = 0, pill = false, tagline = null, align = 'center', yukCol = '#ffffff', boosterCol = P.cyan, shadow = true } = o;
   const a = tw(ctx, 'Booster', size, 'PJS800'), b = tw(ctx, 'yuk', size, 'PJS800');
   const total = a + b; const x0 = align === 'center' ? x - total / 2 : align === 'right' ? x - total : x;
@@ -231,7 +245,7 @@ function rocket(ctx, x, y, s, t, o = {}) {
   ctx.save(); ctx.clip(); ctx.fillStyle = P.cyan5; ctx.fillRect(-120, -260, 240, 70); ctx.fillStyle = '#e2e8f0'; ctx.fillRect(30, -260, 100, 440); ctx.restore();
   ctx.beginPath(); ctx.moveTo(0, -260); ctx.bezierCurveTo(110, -170, 90, 60, 60, 160); ctx.lineTo(-60, 160); ctx.bezierCurveTo(-90, 60, -110, -170, 0, -260); ctx.closePath(); fs(ctx, null, OUT, 6);
   circ(ctx, 0, -100, 42); fs(ctx, '#7dd3fc', OUT, 7); ell(ctx, -12, -112, 10, 16, 0.5); fs(ctx, '#fff');
-  if (logoOn) { ctx.save(); ctx.translate(0, 40); ctx.rotate(-Math.PI / 2); logo(ctx, 0, 0, 34, { shadow: false, yukCol: '#0f172a', boosterCol: P.cyan6 }); ctx.restore(); }
+  if (logoOn) logo(ctx, 0, 52, 30);
   rr(ctx, -62, 150, 124, 24, 8); fs(ctx, '#64748b', OUT, 5);
   ctx.restore();
 }

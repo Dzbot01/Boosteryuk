@@ -22,3 +22,14 @@
 - Ejaan brand di subtitle: "Buster Yuk" (transkrip) → **Boosteryuk**.
 - Deskriptor `[musik]` tidak ditampilkan di video (video musik), tetap bisa ditambahkan di SRT bila perlu.
 - MP4 final tidak di-commit (±98 MB); dikirim langsung dan dapat dibangun ulang dari source.
+
+## 2026-11-13 (WIB) — v1.1
+| Jam | Kegiatan |
+|---|---|
+| 15:51 | Umpan balik: gerak tangan harus seperti dunia nyata (bukan asal tekuk), mic diarahkan ke mulut, ganti logo dengan logo resmi |
+| 15:53 | Riset: ROM siku (0–150°, fungsional 30–130°), 2-bone IK + pole vector (Maya/Unreal), teknik memegang mic panggung |
+| 15:58 | Logo resmi dipotong (964×498, transparan) → `assets/logo/`; loader aset async |
+| 16:00 | Rig baru: IK dua-tulang 3D + pole vector (lengan & kaki), auto-depth, rig mic ke mulut, preset gestur |
+| 16:05 | Lembar uji 16 pose → setel ulang lambai/kepal/garuk/lari/HP; perbaiki kedipan |
+| 16:10 | Render penuh v1.1 (267 s) → audit 10/10 → cek sekuens gerak & penempatan logo |
+| 16:15 | Dokumen ADR-005, riset, audit v1.1; commit & push `feat/music-video` |

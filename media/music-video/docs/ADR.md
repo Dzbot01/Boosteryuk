@@ -21,7 +21,7 @@
 - 2 worker paralel diseimbangkan menurut jumlah frame.
 
 ## ADR-002 — Rig karakter: rubber-hose + wajah parametrik + kepala pseudo-3D
-**Status:** Diterima
+**Status:** Diterima (bagian anggota tubuh *digantikan* oleh ADR-005 pada v1.1)
 
 **Konteks.** Diminta karakter kartun yang "tidak kaku" dan "punya ekspresi", identik di semua scene.
 
@@ -45,3 +45,25 @@
 - Subtitle digambar di frame (font brand Plus Jakarta Sans 700, 34 px, outline + latar navy 50%), posisi bawah-tengah, fade 0,14 s.
 - SRT asli (transkrip otomatis) dikoreksi: "Buster Yuk" → **"Boosteryuk"**, kalimat yang terpotong lintas cue dipecah ulang di batas kalimat (waktu interpolasi per jumlah karakter), deskriptor `[musik]` dihapus.
 - SRT bersih diekspor ke `out/Boosteryuk_lirik_ID.srt` untuk CC YouTube.
+
+## ADR-005 — Lengan & kaki anatomis: IK dua-tulang 3D dengan pole vector (v1.1)
+**Status:** Diterima · 13 Nov 2026
+
+**Konteks.** Umpan balik: tangan "asal tekuk". Lengan rubber-hose v1 berupa satu kurva dengan arah tekuk yang ditentukan tanda `bend`, sehingga siku bisa melengkung ke dalam atau ke atas dan lengan bisa memanjang melebihi panjangnya. Itu tidak mungkin pada lengan asli.
+
+**Keputusan.**
+- Lengan = **lengan atas (62) + lengan bawah (58)**, kaki = **paha (59) + betis (57)** dengan panjang tetap. Tidak ada stretch: target di luar jangkauan dijepit ke jangkauan maksimum.
+- Solver **IK dua-tulang di 3D** (x kanan, y bawah, z ke arah kamera) lalu diproyeksikan ortografis. Kedalaman z membuat lengan yang menjulur ke depan tampak memendek (*foreshortening*), seperti lengan asli dilihat dari depan.
+- Bidang tekuk ditentukan **pole vector** (prinsip yang sama dengan solver 2-bone IK Maya/Unreal):
+  - siku → bawah-luar-belakang `(±0,5, 1, −0,6)`, diputar mengikuti arah hadap tubuh (`turn`);
+  - lutut → depan-luar `(±0,35, 0, 1)`. Saat karakter menghadap samping, lutut menekuk ke arah jalan.
+- Siku hanya menekuk satu arah, dalam rentang 0–~150° sesuai sendi engsel siku.
+- Tangan dekat garis tengah tubuh (antara pinggul dan kepala) otomatis maju ke depan (`autoZ`), misalnya saat memegang HP, menyanyi, atau memegang hati.
+- Preset gestur nyata (`GEST`):
+  - `wave`: lengan atas ke samping, lengan bawah tegak, berayun di poros siku;
+  - `pump`: kepalan setinggi kepala dengan siku menekuk;
+  - `scratch`: siku terangkat ke luar saat menggaruk kepala.
+- **Mic** (`pose.mic = 'R'|'L'`): posisi mulut dihitung dari geometri kepala. Tangan diletakkan di bawah-samping mulut, gagang digenggam di tengah, dan grille 2–8 cm dari mulut mengarah ke antara bibir bawah dan dagu (praktik teknik mic panggung).
+- Arah telapak tangan mengikuti arah lengan bawah (siku → pergelangan).
+
+**Konsekuensi.** Pose yang dulu mengandalkan lengan "melar" disetel ulang: melambai, kepal ke atas, garuk kepala, lari, dan trofi. Lembar uji visual: `tests/arm_sheet.js` (16 pose).

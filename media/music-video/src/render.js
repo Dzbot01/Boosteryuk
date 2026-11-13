@@ -24,6 +24,7 @@ async function renderShot(s, ctx) {
 }
 
 (async () => {
+  await require('./engine').loadAssets();
   const ids = process.argv.slice(2).map(Number);
   const cv = createCanvas(W, H), ctx = cv.getContext('2d');
   for (const i of ids) {

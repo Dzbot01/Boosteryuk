@@ -46,11 +46,37 @@ Temuan pada pass kedua (audit otomatis):
 ## 3. Konsistensi brand & karakter
 - Karakter utama (rambut jabrik, kulit sawo matang, hoodie cyan berlogo petir) identik di 77 shot; piyama hanya di adegan pagi sebelum "ganti baju".
 - Wordmark Booster/yuk, warna cyan/navy, dan font Plus Jakarta Sans/Bricolage Grotesque dipakai di seluruh video.
-- Tidak ada logo platform pihak ketiga. Nama platform tampil sebagai teks saja.
+- Tidak ada logo platform pihak ketiga yang digambar sendiri; nama platform tampil sebagai teks saja. Sejak v1.1, logo resmi Boosteryuk (yang memuat ikon platform) dipakai apa adanya.
 - Klaim yang dipakai hanya yang tampil di situs resmi: 698+ Layanan, 4,9, Support 24/7, Bergaransi, Proses Cepat. Untuk hosting: "Tercepat/Super Cepat/Server Stabil", tanpa angka uptime.
 
 ## 4. Keterbatasan yang diketahui
 - Lip-sync panggung memakai envelope energi vokal, bukan fonem.
 - Lirik dipecah ulang dengan waktu interpolasi per jumlah karakter (± 0,3 s dari ucapan sebenarnya).
-- Logo PNG resmi tidak bisa diunduh dari environment (domain diblokir), jadi wordmark digambar ulang dari font brand.
+- ~~Logo PNG resmi tidak bisa diunduh dari environment (domain diblokir), jadi wordmark digambar ulang dari font brand.~~ Diselesaikan di v1.1: logo resmi dari pemilik brand dipakai.
 - Ukuran 1080p ±98 MB melebihi batas file GitHub (100 MB tidak aman untuk git), sehingga MP4 tidak di-commit. Video bisa dibangun ulang dengan `node src/make.js`.
+
+---
+# Audit v1.1 — 13 Nov 2026 (gerak tangan, mic, logo)
+
+## Perubahan yang diaudit
+1. Lengan & kaki: rubber-hose → **IK dua-tulang 3D anatomis** (ADR-005).
+2. Mic diarahkan ke mulut (grip tengah, grille di bawah bibir).
+3. Logo resmi menggantikan wordmark di 17 titik: judul, gelembung ingatan, kartu brand, header aplikasi di HP, dashboard, roket, logo-hero, bendera, layar LED panggung, trofi, papan arah, langit, logo-slam, end card, dll.
+
+## Hasil
+| Cek | Hasil |
+|---|---|
+| Audit otomatis (`tools/audit.js`) | **10/10 PASS** (7012 frame, 233,733 s, 1080p30, AAC) |
+| Lembar uji 16 pose (`tests/arm_sheet.js`) | Siku selalu menekuk ke bawah/luar; tidak ada lengan melar; telapak mengikuti lengan bawah |
+| Sekuens gerak 10 fps: bernyanyi, melambai, lari | Mic tetap di depan mulut di semua frame; melambai berporos di siku; lengan lari menekuk ±90° |
+| Contact sheet penempatan logo (11 scene) | Logo terbaca, tidak terpotong, tidak menabrak subtitle |
+
+## Temuan & perbaikan
+| # | Temuan | Perbaikan |
+|---|---|---|
+| 15 | Lengan melambai/kepal lurus kaku setelah IK (target di luar jangkauan) | Preset `GEST.wave` / `GEST.pump` dengan siku menekuk |
+| 16 | Garuk kepala: siku menggantung di bawah | `elbowOut` 1,4 → siku terangkat ke samping |
+| 17 | Ayunan tangan lari terlalu lebar | Amplitudo 46 → 36, tangan dekat badan |
+| 18 | HP terlalu besar (seperti tablet) | 64×118 → 54×100 |
+| 19 | Logo LED panggung tertutup kepala | Logo digeser ke 40% tinggi layar |
+| 20 | Kedipan penuh tampak seperti lingkaran mata kosong | Kedipan > 80% digambar sebagai garis kelopak tertutup |

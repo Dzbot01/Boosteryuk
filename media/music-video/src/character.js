@@ -84,21 +84,98 @@ function resolve(p) {
   return r;
 }
 function rot(x, y, a) { const c = Math.cos(a), s = Math.sin(a); return { x: x * c - y * s, y: x * s + y * c }; }
+// ---------- anatomical IK ----------
+// Two-bone IK in 3D (x right, y down, z toward camera) projected orthographically.
+// Segment lengths are fixed (no rubber stretching); the bend plane is chosen by a pole vector,
+// so elbows always flex the anatomical way (down/out/back) and knees bend forward/outward.
+const L_UP = 62, L_FORE = 58, L_THIGH = 59, L_SHIN = 57;
+function rotY(v, a) { const c = Math.cos(a), s = Math.sin(a); return { x: v.x * c + v.z * s, y: v.y, z: -v.x * s + v.z * c }; }
+function ik3(S, T, L1, L2, pole) {
+  let dx = T.x - S.x, dy = T.y - S.y, dz = T.z - S.z; let d = Math.hypot(dx, dy, dz) || 1e-6;
+  const maxR = (L1 + L2) * 0.995, minR = Math.abs(L1 - L2) + 6;
+  const k = d > maxR ? maxR / d : d < minR ? minR / d : 1;
+  dx *= k; dy *= k; dz *= k; d *= k;
+  const H = { x: S.x + dx, y: S.y + dy, z: S.z + dz };
+  const u = { x: dx / d, y: dy / d, z: dz / d };
+  const a = (L1 * L1 - L2 * L2 + d * d) / (2 * d), h = Math.sqrt(Math.max(0, L1 * L1 - a * a));
+  const pd = pole.x * u.x + pole.y * u.y + pole.z * u.z;
+  let v = { x: pole.x - pd * u.x, y: pole.y - pd * u.y, z: pole.z - pd * u.z }; let vl = Math.hypot(v.x, v.y, v.z);
+  if (vl < 1e-4) { v = { x: 0, y: 0, z: -1 }; vl = 1; }
+  v = { x: v.x / vl, y: v.y / vl, z: v.z / vl };
+  const Ej = { x: S.x + u.x * a + v.x * h, y: S.y + u.y * a + v.y * h, z: S.z + u.z * a + v.z * h };
+  return { E: Ej, H, reach: d / (L1 + L2), flex: Math.PI - Math.acos(Math.max(-1, Math.min(1, (L1 * L1 + L2 * L2 - d * d) / (2 * L1 * L2)))) };
+}
+// How far in front of the body a hand naturally sits (hands near the body's midline and between hips and head come forward).
+function autoZ(hx, hy) {
+  const inX = clamp(1 - (Math.abs(hx) - 34) / 40), inY = clamp((hy + 345) / 50) * clamp((-78 - hy) / 40);
+  return 62 * inX * inY;
+}
+function mouthPos(p, head) { // mouth in character space
+  const th = p.turn * 0.8; const m = rot(84 * Math.sin(th) * 0.95, 52, p.lean + p.headTilt);
+  return { x: head.x + m.x, y: head.y + m.y };
+}
 function geo(p) {
   const sx = 1 - p.squash * 0.5, sy = 1 + p.squash;
   const hip = { x: 0, y: -110 + p.crouch };
   const T = (lx, ly) => { const v = rot(lx * sx, ly * sy, p.lean); return { x: hip.x + v.x, y: hip.y + v.y }; };
   const shL = T(-50, -84), shR = T(50, -84);
-  const aL = rot(p.armL.x, p.armL.y, p.lean * 0.6), aR = rot(p.armR.x, p.armR.y, p.lean * 0.6);
-  const hL = { x: shL.x + aL.x, y: shL.y + aL.y }, hR = { x: shR.x + aR.x, y: shR.y + aR.y };
   const hpL = T(-24, -8), hpR = T(24, -8);
   const neck = T(0, -98);
   const hd = rot(p.headDX, -74 + p.headDY, p.lean + p.headTilt);
   const head = { x: neck.x + hd.x, y: neck.y + hd.y };
-  return { sx, sy, hip, T, shL, shR, hL, hR, hpL, hpR, neck, head };
+  const mouth = mouthPos(p, head);
+  const th = p.turn * 0.8;
+  const arms = {};
+  for (const [k, side, sh, arm] of [['L', -1, shL, p.armL], ['R', 1, shR, p.armR]]) {
+    let t2, z;
+    if (p.mic === k) { // hand below/beside the mouth, mic aimed between lower lip and chin
+      t2 = { x: mouth.x + side * 30, y: mouth.y + 66 }; z = 46;
+    } else {
+      const a = rot(arm.x, arm.y, p.lean * 0.6); t2 = { x: sh.x + a.x, y: sh.y + a.y };
+      z = arm.z !== undefined ? arm.z : autoZ(t2.x, t2.y);
+    }
+    const pole = rotY({ x: side * 0.5, y: 1, z: -0.6 }, th);
+    if (arm.elbowOut) { pole.x += side * arm.elbowOut; pole.y -= arm.elbowOut * 0.5; }
+    const r = ik3({ x: sh.x, y: sh.y, z: 0 }, { x: t2.x, y: t2.y, z }, L_UP, L_FORE, pole);
+    arms[k] = { S: sh, E: r.E, H: r.H, flex: r.flex };
+  }
+  const legs = {};
+  for (const [k, side, hp, leg] of [['L', -1, hpL, p.legL], ['R', 1, hpR, p.legR]]) {
+    const pole = rotY({ x: side * 0.35, y: 0, z: 1 }, th);
+    const r = ik3({ x: hp.x, y: hp.y, z: 0 }, { x: leg.x, y: leg.y, z: leg.z || 0 }, L_THIGH, L_SHIN, pole);
+    legs[k] = { S: hp, E: r.E, H: r.H };
+  }
+  return { sx, sy, hip, T, shL, shR, hL: arms.L.H, hR: arms.R.H, hpL, hpR, neck, head, mouth, arms, legs };
 }
 
 // ---------- limbs ----------
+function jointPath(ctx, A, B, C) {
+  const ab = Math.hypot(B.x - A.x, B.y - A.y) || 1, bc = Math.hypot(C.x - B.x, C.y - B.y) || 1;
+  const r = Math.min(14, ab * 0.35, bc * 0.35);
+  const p1 = { x: B.x + (A.x - B.x) * r / ab, y: B.y + (A.y - B.y) * r / ab }, p2 = { x: B.x + (C.x - B.x) * r / bc, y: B.y + (C.y - B.y) * r / bc };
+  ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(p1.x, p1.y); ctx.quadraticCurveTo(B.x, B.y, p2.x, p2.y); ctx.lineTo(C.x, C.y);
+}
+function joint(ctx, A, B, C, w, col, cuff) {
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  jointPath(ctx, A, B, C); ctx.strokeStyle = OUT; ctx.lineWidth = w + 10; ctx.stroke();
+  ctx.strokeStyle = col; ctx.lineWidth = w; ctx.stroke();
+  if (cuff) { const p1 = { x: lerp(B.x, C.x, 0.74), y: lerp(B.y, C.y, 0.74) }, p2 = { x: lerp(B.x, C.x, 0.88), y: lerp(B.y, C.y, 0.88) }; ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.strokeStyle = cuff; ctx.lineWidth = w; ctx.lineCap = 'butt'; ctx.stroke(); ctx.lineCap = 'round'; }
+  return Math.atan2(C.y - B.y, C.x - B.x);
+}
+// Handheld mic held mid-handle, grille 2-8 cm from the mouth, aimed between lower lip and chin.
+function drawMic(ctx, H, mouth, side) {
+  const target = { x: mouth.x + side * 8, y: mouth.y + 16 };
+  let dx = target.x - H.x, dy = target.y - H.y; const d = Math.hypot(dx, dy) || 1; dx /= d; dy /= d;
+  const ball = { x: H.x + dx * Math.max(36, d - 4), y: H.y + dy * Math.max(36, d - 4) };
+  const tail = { x: H.x - dx * 30, y: H.y - dy * 30 };
+  ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(tail.x, tail.y); ctx.lineTo(ball.x - dx * 14, ball.y - dy * 14); ctx.strokeStyle = OUT; ctx.lineWidth = 22; ctx.stroke(); ctx.strokeStyle = '#334155'; ctx.lineWidth = 13; ctx.stroke();
+  ctx.save(); ctx.translate(ball.x, ball.y); ctx.rotate(Math.atan2(dy, dx));
+  ell(ctx, 0, 0, 17, 19); fs(ctx, '#cbd5e1', OUT, 4.5);
+  for (const gx of [-8, 0, 8]) line(ctx, gx, -15, gx, 15, '#64748b', 2);
+  rr(ctx, -22, -11, 8, 22, 3); fs(ctx, '#94a3b8', OUT, 3);
+  ctx.restore();
+}
 function qpt(a, c, b, t) { const u = 1 - t; return { x: u * u * a.x + 2 * u * t * c.x + t * t * b.x, y: u * u * a.y + 2 * u * t * c.y + t * t * b.y }; }
 function limb(ctx, a, b, len, bend, w, col, cuff) {
   const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 1;
@@ -252,6 +329,7 @@ function eye(ctx, x, y, side, f, E, look, blinkK, cast, t) {
   const rx = 17 * E.eyeS * (0.4 + 0.6 * f), ry = 21 * E.eyeS;
   let mode = E.eye;
   if (mode === 'wink') mode = side > 0 ? 'happy' : 'normal';
+  if ((mode === 'normal' || mode === 'wide') && blinkK > 0.8) mode = 'closed'; // full blink reads as a closed lid line
   ctx.save(); ctx.translate(x, y);
   if (mode === 'happy') {
     ctx.beginPath(); ctx.moveTo(-rx, 6); ctx.quadraticCurveTo(0, -ry * 1.25, rx, 6); fs(ctx, null, OUT, 6.5);
@@ -403,20 +481,20 @@ function drawChar(ctx, pose, prevPose) {
   if (bodyRot) { ctx.translate(0, -150); ctx.rotate(bodyRot); ctx.translate(0, 150); }
   // legs
   if (!p.hideLegs) {
-    for (const [side, leg, hp] of [[-1, p.legL, g.hpL], [1, p.legR, g.hpR]]) {
-      limb(ctx, hp, leg, 114, leg.bend, 30, o.pants);
-      shoe(ctx, leg, side, p, o, cast);
+    for (const [side, leg, k] of [[-1, p.legL, 'L'], [1, p.legR, 'R']]) {
+      const L = g.legs[k]; joint(ctx, L.S, L.E, L.H, 30, o.pants);
+      shoe(ctx, Object.assign({}, L.H, { lift: leg.lift }), side, p, o, cast);
     }
   }
   const armList = [[-1, p.armL, g.shL, 'L'], [1, p.armR, g.shR, 'R']];
   const drawArm = ([side, arm, sh, k]) => {
-    const h = { x: sh.x + (arm.x !== undefined ? 0 : 0), y: 0 };
-    const hp = k === 'L' ? g.hL : g.hR;
-    const r = limb(ctx, sh, hp, 116, arm.bend, 25, o.top, o.cuff);
+    const A = g.arms[k], hp = A.H;
+    const ang = joint(ctx, A.S, A.E, A.H, 25, o.top, o.cuff);
     const prop = p.hold[k];
-    if (prop) prop(ctx, hp.x, hp.y, r.ang, p);
-    hand(ctx, hp.x, hp.y, arm.handRot !== undefined ? arm.handRot : r.ang, arm.hand, cast, side * p.flip);
-    if (p.hold[k + 'front']) p.hold[k + 'front'](ctx, hp.x, hp.y, r.ang, p);
+    if (prop) prop(ctx, hp.x, hp.y, ang, p);
+    if (p.mic === k) drawMic(ctx, hp, g.mouth, side);
+    hand(ctx, hp.x, hp.y, arm.handRot !== undefined ? arm.handRot : ang, p.mic === k ? 'fist' : arm.hand, cast, side * p.flip);
+    if (p.hold[k + 'front']) p.hold[k + 'front'](ctx, hp.x, hp.y, ang, p);
   };
   // arms flagged as behind
   armList.filter(a => a[1].behind).forEach(drawArm);
@@ -480,13 +558,19 @@ function run(t, speed = 2.6, stride = 52) {
   return {
     legL: { x: -12 + s * stride, y: -Math.max(0, c) * 46, bend: 1 },
     legR: { x: 12 - s * stride, y: -Math.max(0, -c) * 46, bend: -1 },
-    armL: { x: -30 - s * 46, y: 60 - Math.abs(s) * 10, bend: 1, hand: 'fist' },
-    armR: { x: 30 + s * 46, y: 60 - Math.abs(s) * 10, bend: -1, hand: 'fist' },
+    armL: { x: -14 - s * 36, y: 52 - Math.abs(s) * 14, bend: 1, hand: 'fist' },
+    armR: { x: 14 + s * 36, y: 52 - Math.abs(s) * 14, bend: -1, hand: 'fist' },
     crouch: 6 + Math.abs(c) * 12, jump: Math.abs(c) * 10, lean: 0.12,
   };
 }
+// Natural gesture presets (hand targets relative to the shoulder; IK bends the elbow anatomically)
+const GEST = {
+  wave: (t, side = 1) => ({ x: side * (60 + Math.sin(t * 9) * 16), y: -64, hand: 'open' }),   // upper arm out, forearm up
+  pump: (side = 1) => ({ x: side * 42, y: -64, hand: 'fist' }),                               // fist at head height, elbow bent
+  scratch: (side = 1) => ({ x: -side * 12, y: -112, hand: 'fist', elbowOut: 1.4 }),             // hand on head, elbow raised outward
+};
 const STAND = () => ({ legL: { x: -30, y: 0, bend: 1 }, legR: { x: 30, y: 0, bend: -1 } });
 function idle(t) { return { crouch: Math.sin(t * 2.2) * 2.5, headTilt: Math.sin(t * 1.3) * 0.03, lean: Math.sin(t * 0.9) * 0.015 }; }
 function merge(...objs) { const r = {}; for (const o of objs) if (o) for (const k in o) { if (o[k] && typeof o[k] === 'object' && !Array.isArray(o[k]) && typeof o[k] !== 'function' && r[k] && typeof r[k] === 'object') r[k] = Object.assign({}, r[k], o[k]); else r[k] = o[k]; } return r; }
 
-module.exports = { drawChar, drawHeadAt, resolve, EXPR, CAST, OUTFIT, walk, run, idle, STAND, merge, bulb, rainCloud, hand };
+module.exports = { GEST, drawChar, drawHeadAt, resolve, EXPR, CAST, OUTFIT, walk, run, idle, STAND, merge, bulb, rainCloud, hand };

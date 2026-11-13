@@ -21,23 +21,17 @@ Preview frame: `node src/preview.js 12.5 70.2` atau contact sheet `node src/prev
 | Path | Isi |
 |---|---|
 | `src/engine.js` | Konstanta, easing, keyframe, sinkronisasi beat, helper gambar, ikon |
-| `src/character.js` | Rig karakter: anggota tubuh rubber-hose, 25+ ekspresi, kepala pseudo-3D, secondary motion |
+| `src/character.js` | Rig karakter: lengan & kaki IK 3D anatomis (pole vector), rig mic, 25+ ekspresi, kepala pseudo-3D, secondary motion |
 | `src/bg.js` | Background: kamar, ruang kerja, kota, langit, panggung, ruang server, bukit, efek |
 | `src/ui.js` | Wordmark brand, HP/laptop + layar (sosmed, Boosteryuk, dashboard), props |
 | `src/shots1.js`, `src/shots2.js` | 77 shot (0:00–1:32, 1:32–3:53) |
 | `src/timeline.js` | Driver frame, snap ke beat, transisi, subtitle |
 | `src/subtitles.js` | Cue lirik bersih + ekspor SRT |
 | `src/render.js`, `src/make.js` | Render per shot (ffmpeg) + build penuh |
+| `assets/logo/` | Logo resmi Boosteryuk (PNG transparan) |
 | `analysis/` | Analisis audio (librosa) |
 | `docs/` | PRD, ADR, ERD/model data, storyboard, riset, audit |
 | `WORKLOG.md` | Catatan kerja |
 
 ## Dokumen
 [PRD](docs/PRD.md) · [ADR](docs/ADR.md) · [Model data/ERD](docs/DATA-MODEL.md) · [Storyboard](docs/STORYBOARD.md) · [Riset](docs/RESEARCH.md) · [Audit QA](docs/AUDIT.md)
-
-## Cuplikan
-![Ekspresi karakter](docs/img/character_expressions.jpg)
-![Contact sheet 0:00–0:37](docs/img/contact_sheet_a.jpg)
-![Contact sheet 0:37–1:32](docs/img/contact_sheet_b.jpg)
-![Contact sheet 1:32–2:31](docs/img/contact_sheet_c.jpg)
-![Contact sheet 2:31–3:53](docs/img/contact_sheet_d.jpg)

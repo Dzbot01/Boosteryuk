@@ -70,6 +70,6 @@ function labelTop(ctx, str, a = 1, o = {}) { // headline banner near top
 function holdPhone(o = {}) {
   const { x = 44, y = 82, tilt = 0.08 } = o;
   return { armL: { x, y, bend: 1, hand: 'hold' }, look: [0, 0.75], headTilt: 0.1,
-    hold: { L: (c, hx, hy) => U.phone(c, hx + 24, hy - 32, 64, 118, tilt, { back: true }) } };
+    hold: { L: (c, hx, hy) => U.phone(c, hx + 20, hy - 26, 54, 100, tilt, { back: true }) } };
 }
 module.exports = { En, C, U, B, act, cu, pov, bokeh, flash, scribbles, glitch, labelTop, holdPhone };

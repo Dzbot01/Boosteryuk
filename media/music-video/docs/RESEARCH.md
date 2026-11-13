@@ -26,8 +26,17 @@ Implikasi: cut dan aksi karakter dikunci ke grid beat; shot di chorus dibuat leb
 
 ## 4. Prinsip konten iklan yang dijaga
 - Masalah → titik balik → solusi → bukti → ajakan (struktur *problem–agitate–solve*).
-- Tidak memakai logo platform pihak ketiga; nama platform hanya sebagai teks layanan.
+- Tidak menggambar logo platform pihak ketiga sendiri; nama platform hanya sebagai teks layanan. Logo resmi Boosteryuk dipakai apa adanya (v1.1).
 - Angka pertumbuhan di HP adalah cerita karakter fiktif, bukan janji hasil.
+
+## 5. Referensi gerak tangan (v1.1)
+| Referensi | Fakta | Diterapkan sebagai |
+|---|---|---|
+| Wheeless' Textbook of Orthopaedics — sendi siku | Siku sendi engsel: fleksi 0–150°, busur fungsional 30–130°, pronasi/supinasi ±80° | Siku menekuk satu arah, panjang tulang tetap, tanpa hiperekstensi |
+| Autodesk Maya — 2 Bone IK solver | Rantai bahu-siku-pergelangan berada pada satu bidang; **pole vector** memutar bidang itu sehingga menentukan arah siku/lutut | IK 3D + pole vector untuk siku (bawah-luar-belakang) & lutut (depan) |
+| UCLA DMA — catatan IK Maya | Pole vector mengontrol arah hadap siku; posisi sendi menentukan sumbu engsel lutut | Pole diputar mengikuti arah hadap karakter |
+| Forum Unreal Engine — Two Bone IK pole target | Pole target otomatis dihitung dari arah tubuh agar siku tidak berbalik | Pole default dihitung dari `turn`, plus override `elbowOut` |
+| My New Microphone — *How To Hold A Microphone When Singing Live* | Pegang mic di tengah gagang, 1–3 inci (2–8 cm) dari mulut, arahkan sedikit off-axis (antara bibir bawah dan dagu), jangan menutup grille, lengan & bahu rileks | Rig mic: grip tengah, grille di bawah mulut mengarah ke mulut, siku turun santai |
 
 ## Sumber
 - Netflix Partner Help — Timed Text Style Guide: General Requirements: https://backlothelp.netflix.com/hc/en-us/articles/215758617
@@ -37,3 +46,8 @@ Implikasi: cut dan aksi karakter dikunci ke grid beat; shot di chorus dibuat leb
 - CapCut — Montage Rhythm: Match Cut Speed to Music: https://www.capcut.com/create/music-video-pacing-emotional-montage-rhythm
 - Between the Frames — Fundamentals of Animation in *Stuck in the Sound — Let's Go*: https://medium.com/betweentheframes/fundamentals-of-animation-in-stuck-in-the-sound-lets-go-3a12a4dd0665
 - Between the Frames — Animation Fundamentals: *Jenny* (Official Music Video): https://medium.com/betweentheframes/animation-fundamentals-jenny-official-music-video-be625b4cf101
+- Wheeless' Textbook of Orthopaedics — Elbow Joint: https://www.wheelessonline.com/joints/elbow-joint/
+- Autodesk Maya Help — 2 Bone IK solver: https://help.autodesk.com/cloudhelp/2026/ENU/Maya-CharacterAnimation/files/GUID-CEA46DDD-40C8-4F78-8928-DEBE1A94E430.htm
+- UCLA DMA — Maya IK course notes: https://users.dma.ucla.edu/~cariesta/MayaCourseNotes/html/ik.html
+- Unreal Engine Forums — Automatically compute the Two Bone IK pole vector: https://forums.unrealengine.com/t/automatically-compute-the-two-bone-ik-pole-vector-joint-target/148105
+- My New Microphone — How To Hold A Microphone When Singing Live: https://mynewmicrophone.com/hold-microphone-singing-live/
