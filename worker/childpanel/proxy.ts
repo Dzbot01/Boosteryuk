@@ -76,7 +76,13 @@ export function isChallengeHtml(contentType: string | null, body: string): boole
   return /aes\.js/i.test(body) && /__test=/i.test(body);
 }
 
-const HOP_HEADERS = ["host", "cf-connecting-ip", "cf-ipcountry", "cf-ray", "cf-visitor", "cf-worker", "x-forwarded-proto", "x-real-ip", "connection", "keep-alive", "transfer-encoding", "upgrade"];
+// Header yang TIDAK boleh diteruskan ke AeonFree. Penting: iFastNet memakai X-Forwarded-Host /
+// Forwarded untuk memilih domain → host child panel yang tak terdaftar dianggap "Domain Suspended".
+const HOP_HEADERS = [
+  "host", "cf-connecting-ip", "cf-ipcountry", "cf-ray", "cf-visitor", "cf-worker", "x-real-ip",
+  "x-forwarded-host", "x-forwarded-for", "x-forwarded-proto", "x-forwarded-server", "forwarded", "x-original-host", "x-host",
+  "connection", "keep-alive", "transfer-encoding", "upgrade",
+];
 
 function originUrl(env: ChildPanelEnv, url: URL) {
   const origin = (env.CHILD_PANEL_ORIGIN || `https://${rootOf(env)}`).replace(/\/+$/, "");
@@ -86,10 +92,10 @@ function originUrl(env: ChildPanelEnv, url: URL) {
 async function buildOriginRequest(request: Request, env: ChildPanelEnv, sub: string, url: URL): Promise<Request> {
   const headers = new Headers(request.headers);
   for (const h of HOP_HEADERS) headers.delete(h);
+  // Tenant hanya dikirim lewat header khusus (bukan X-Forwarded-Host, lihat HOP_HEADERS).
   headers.set("X-Child-Panel", sub);
-  headers.set("X-Forwarded-Host", url.host);
   const ip = request.headers.get("cf-connecting-ip");
-  if (ip) headers.set("X-Forwarded-For", ip);
+  if (ip) headers.set("X-Child-Client-IP", ip);
   const hasBody = !["GET", "HEAD"].includes(request.method);
   // Body di-buffer (request panel kecil) agar kompatibel di runtime Workers & Node (tes).
   return new Request(originUrl(env, url), {
@@ -178,18 +184,32 @@ async function fetchCached(req: Request, ctx: Ctx | undefined): Promise<Response
   return res;
 }
 
-async function health(env: ChildPanelEnv, sub: string, url: URL): Promise<Response> {
+/** Redirect origin ke domain lain (mis. suspended-domain.net) = domain tidak dikenali hosting. */
+export function foreignRedirect(res: Response, env: ChildPanelEnv, childHost: string): string | null {
+  const loc = res.headers.get("location");
+  if (!loc || res.status < 300 || res.status >= 400) return null;
+  try {
+    const host = new URL(loc, `https://${childHost}`).hostname.toLowerCase();
+    const root = rootOf(env);
+    return host === root || host.endsWith(`.${root}`) ? null : host;
+  } catch {
+    return null;
+  }
+}
+
+async function health(request: Request, env: ChildPanelEnv, sub: string, url: URL): Promise<Response> {
   const probes: Record<string, unknown> = {};
   for (const path of ["/", "/api/site_settings.php"]) {
     const t0 = Date.now();
     try {
-      const r = await fetch(originUrl(env, new URL(path, url)), {
-        headers: { "X-Child-Panel": sub, "User-Agent": "Mozilla/5.0 (child-panel-health)" },
-        redirect: "manual",
-      });
+      // Header sama persis dengan proxy sungguhan (agar hasil tes mewakili pengunjung asli).
+      const probeUrl = new URL(path, url);
+      const r = await fetch(await buildOriginRequest(new Request(probeUrl, { headers: request.headers }), env, sub, probeUrl));
       const body = await r.text();
       probes[path] = {
         status: r.status,
+        location: r.headers.get("location"),
+        foreignRedirect: foreignRedirect(r, env, url.host),
         contentType: r.headers.get("content-type"),
         challenge: isChallengeHtml(r.headers.get("content-type"), body),
         bytes: body.length,
@@ -199,7 +219,7 @@ async function health(env: ChildPanelEnv, sub: string, url: URL): Promise<Respon
       probes[path] = { error: e instanceof Error ? e.message : String(e) };
     }
   }
-  const blocked = Object.values(probes).some((p: any) => p.challenge || p.error || (p.status && p.status >= 500));
+  const blocked = Object.values(probes).some((p: any) => p.challenge || p.error || p.foreignRedirect || (p.status && p.status >= 500));
   return new Response(
     JSON.stringify({
       ok: !blocked,
@@ -218,11 +238,19 @@ async function health(env: ChildPanelEnv, sub: string, url: URL): Promise<Respon
 /** Tangani request child panel. */
 export async function handleChildPanel(request: Request, env: ChildPanelEnv, ctx: Ctx | undefined, sub: string): Promise<Response> {
   const url = new URL(request.url);
-  if (url.pathname === "/__child/health") return health(env, sub, url);
+  if (url.pathname === "/__child/health") return health(request, env, sub, url);
 
   const originReq = await buildOriginRequest(request, env, sub, url);
   try {
     const res = request.method === "GET" && CACHEABLE.test(url.pathname) ? await fetchCached(originReq, ctx) : await fetch(originReq);
+    const foreign = foreignRedirect(res, env, url.host);
+    if (foreign) {
+      // Jangan lempar pengunjung ke halaman hosting (mis. suspended-domain.net).
+      return new Response(
+        `<!doctype html><meta charset="utf-8"><title>Child panel belum siap</title><p>Panel ini sedang tidak tersedia. Silakan coba lagi nanti.</p>`,
+        { status: 502, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "X-Child-Panel": sub, "X-Child-Error": `origin redirect to ${foreign}` } },
+      );
+    }
     const adapted = await rewriteHtml(adaptResponse(res, env, url.host, sub), env, url.host);
     return injectTenant(adapted, sub);
   } catch (e) {
