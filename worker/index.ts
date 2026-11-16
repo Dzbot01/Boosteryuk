@@ -400,6 +400,29 @@ if (url.pathname.includes("/callback")) {
 
   console.log("Tripay Callback:", bodyText);
 
+  // KEAMANAN: verifikasi signature Tripay (HMAC-SHA256 raw body dengan TRIPAY_PRIVATE_KEY) SEBELUM
+  // meneruskan ke callback.php. Tanpa ini siapa pun bisa mengirim callback "PAID" palsu ke URL Worker
+  // dan Worker meneruskannya lengkap dengan X-Callback-Secret → saldo bertambah gratis.
+  const signatureValid = await (async () => {
+    const privateKey = String(env.TRIPAY_PRIVATE_KEY || "").trim();
+    if (!privateKey || !tripaySignature) return false;
+    const enc = new TextEncoder();
+    const key = await crypto.subtle.importKey("raw", enc.encode(privateKey), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const digest = await crypto.subtle.sign("HMAC", key, enc.encode(bodyText));
+    const expected = Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+    const received = tripaySignature.toLowerCase();
+    let diff = expected.length ^ received.length;
+    for (let i = 0; i < Math.min(expected.length, received.length); i++) diff |= expected.charCodeAt(i) ^ received.charCodeAt(i);
+    return diff === 0;
+  })();
+  if (!signatureValid) {
+    console.log("Callback Tripay DITOLAK: signature tidak valid / TRIPAY_PRIVATE_KEY kosong.");
+    return new Response(JSON.stringify({ success: false, message: "Invalid signature" }), {
+      status: 403,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
   // Forward callback ke backend PHP; logic dan konfigurasi lama dipertahankan.
   const forwardTask = async () => {
     try {
