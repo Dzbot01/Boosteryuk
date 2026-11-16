@@ -1,9 +1,7 @@
 import { useNavigate } from 'react-router-dom';
+// FIX: hapus import ikon yang tidak dipakai (ShieldCheck, Rocket, Gauge) agar lolos typecheck.
 import {
-  ShieldCheck,
   Star,
-  Rocket,
-  Gauge,
   TrendingUp,
   UserRound,
   Shield,
@@ -151,8 +149,10 @@ export default function HomePage() {
             </div>
 
             {/* Auth buttons — compact, shown until a user signs in */}
+            {/* FIX: tambah `flex` — tanpa ini `flex-wrap`/`items-center`/`gap` tidak berlaku
+                sehingga tombol Masuk & Daftar menumpuk ke bawah, bukan sejajar. */}
             {!user && (
-              <div className="mt-4 flex-wrap items-center gap-2">
+              <div className="mt-4 flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={() => {
@@ -184,7 +184,9 @@ export default function HomePage() {
               <div className="absolute h-3/4 w-3/4 rounded-full bg-blue-200/40 blur-3xl dark:bg-blue-800/20" />
               <span className="absolute h-[88%] w-[88%] rounded-full border border-slate-200 dark:border-slate-700/60" />
               <span className="absolute h-[64%] w-[64%] rounded-full border border-slate-200/70 dark:border-slate-700/40" />
-              <span className="absolute h-[42%] w-[42%] rounded-full border-slate-200/50 dark:border-slate-700/30" />
+              {/* FIX: tambah `border` — tanpa keyword ini warna border tak punya lebar garis
+                  sehingga ring dekorasi ke-3 tidak pernah terlihat. */}
+              <span className="absolute h-[42%] w-[42%] rounded-full border border-slate-200/50 dark:border-slate-700/30" />
               <img
                 src={LOGO_URL}
                 alt="Boosteryuk"
@@ -204,8 +206,10 @@ export default function HomePage() {
                 </div>
               </div>
 
+              {/* FIX: tambah `border` — card floating "Engagement naik" kehilangan garis tepi
+                  karena hanya ada warna border tanpa keyword `border` (samakan dgn card atas). */}
               <div
-                className="animate-float absolute bottom-10 right-0 flex items-center gap-2.5 rounded-2xl border-slate-200 bg-white/95 px-3.5 py-2.5 shadow-xl shadow-slate-900/10 backdrop-blur dark:border-slate-700/60 dark:bg-slate-800/95 sm:right-2"
+                className="animate-float absolute bottom-10 right-0 flex items-center gap-2.5 rounded-2xl border border-slate-200 bg-white/95 px-3.5 py-2.5 shadow-xl shadow-slate-900/10 backdrop-blur dark:border-slate-700/60 dark:bg-slate-800/95 sm:right-2"
                 style={{ animationDelay: '1.4s' }}
               >
                 <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-600 text-white">
